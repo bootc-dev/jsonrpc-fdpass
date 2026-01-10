@@ -1,5 +1,5 @@
 use crate::error::{Error, Result};
-use crate::message::{JsonRpcMessage, MessageWithFds};
+use crate::message::{JsonRpcMessage, MessageWithFds, FD_INDEX_KEY, FD_PLACEHOLDER_KEY};
 use rustix::fd::AsFd;
 use rustix::net::{
     RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags, SendAncillaryBuffer,
@@ -153,7 +153,7 @@ impl Receiver {
         match value {
             serde_json::Value::Object(map) => {
                 if let (Some(serde_json::Value::Bool(true)), Some(_)) =
-                    (map.get("__jsonrpc_fd__"), map.get("index"))
+                    (map.get(FD_PLACEHOLDER_KEY), map.get(FD_INDEX_KEY))
                 {
                     *count += 1;
                 } else {

@@ -3,6 +3,13 @@ use jsonrpsee::types::error::ErrorObject as JsonRpcError;
 use serde::{Deserialize, Serialize};
 use std::os::unix::io::OwnedFd;
 
+/// The JSON key used to identify file descriptor placeholders.
+pub const FD_PLACEHOLDER_KEY: &str = "__jsonrpc_fd__";
+/// The JSON key for the file descriptor index within a placeholder.
+pub const FD_INDEX_KEY: &str = "index";
+/// The JSON-RPC protocol version.
+pub const JSONRPC_VERSION: &str = "2.0";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileDescriptorPlaceholder {
     #[serde(rename = "__jsonrpc_fd__")]
@@ -55,7 +62,7 @@ pub enum JsonRpcMessage {
 impl JsonRpcRequest {
     pub fn new(method: String, params: Option<serde_json::Value>, id: serde_json::Value) -> Self {
         Self {
-            jsonrpc: "2.0".to_string(),
+            jsonrpc: JSONRPC_VERSION.to_string(),
             method,
             params,
             id,
@@ -66,7 +73,7 @@ impl JsonRpcRequest {
 impl JsonRpcResponse {
     pub fn success(result: serde_json::Value, id: serde_json::Value) -> Self {
         Self {
-            jsonrpc: "2.0".to_string(),
+            jsonrpc: JSONRPC_VERSION.to_string(),
             result: Some(result),
             error: None,
             id,
@@ -75,7 +82,7 @@ impl JsonRpcResponse {
 
     pub fn error(error: JsonRpcError<'static>, id: serde_json::Value) -> Self {
         Self {
-            jsonrpc: "2.0".to_string(),
+            jsonrpc: JSONRPC_VERSION.to_string(),
             result: None,
             error: Some(error),
             id,
@@ -86,7 +93,7 @@ impl JsonRpcResponse {
 impl JsonRpcNotification {
     pub fn new(method: String, params: Option<serde_json::Value>) -> Self {
         Self {
-            jsonrpc: "2.0".to_string(),
+            jsonrpc: JSONRPC_VERSION.to_string(),
             method,
             params,
         }
@@ -148,7 +155,7 @@ impl MessageWithFds {
         let fd_count = self.file_descriptors.len();
         let mut placeholder_indices = Vec::new();
 
-        self.collect_placeholder_indices(value, &mut placeholder_indices);
+        Self::collect_placeholder_indices(value, &mut placeholder_indices);
 
         if placeholder_indices.len() != fd_count {
             return Err(Error::MismatchedCount {
@@ -166,26 +173,26 @@ impl MessageWithFds {
         Ok(())
     }
 
-    fn collect_placeholder_indices(&self, value: &serde_json::Value, indices: &mut Vec<usize>) {
+    fn collect_placeholder_indices(value: &serde_json::Value, indices: &mut Vec<usize>) {
         match value {
             serde_json::Value::Object(map) => {
                 if let (
                     Some(serde_json::Value::Bool(true)),
                     Some(serde_json::Value::Number(index)),
-                ) = (map.get("__jsonrpc_fd__"), map.get("index"))
+                ) = (map.get(FD_PLACEHOLDER_KEY), map.get(FD_INDEX_KEY))
                 {
                     if let Some(index) = index.as_u64() {
                         indices.push(index as usize);
                     }
                 } else {
                     for v in map.values() {
-                        self.collect_placeholder_indices(v, indices);
+                        Self::collect_placeholder_indices(v, indices);
                     }
                 }
             }
             serde_json::Value::Array(arr) => {
                 for v in arr {
-                    self.collect_placeholder_indices(v, indices);
+                    Self::collect_placeholder_indices(v, indices);
                 }
             }
             _ => {}
@@ -219,7 +226,7 @@ impl MessageWithFds {
         match value {
             serde_json::Value::Object(map) => {
                 if let (Some(serde_json::Value::Bool(true)), Some(_)) =
-                    (map.get("__jsonrpc_fd__"), map.get("index"))
+                    (map.get(FD_PLACEHOLDER_KEY), map.get(FD_INDEX_KEY))
                 {
                     *count += 1;
                 } else {
@@ -260,7 +267,7 @@ impl MessageWithFds {
                 if let (
                     Some(serde_json::Value::Bool(true)),
                     Some(serde_json::Value::Number(index)),
-                ) = (map.get("__jsonrpc_fd__"), map.get("index"))
+                ) = (map.get(FD_PLACEHOLDER_KEY), map.get(FD_INDEX_KEY))
                 {
                     if let Some(index) = index.as_u64() {
                         indices.push(index as usize);
