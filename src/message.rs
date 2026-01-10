@@ -10,6 +10,34 @@ pub const FD_INDEX_KEY: &str = "index";
 /// The JSON-RPC protocol version.
 pub const JSONRPC_VERSION: &str = "2.0";
 
+/// Count file descriptor placeholders in a JSON value.
+pub fn count_fd_placeholders(value: &serde_json::Value) -> usize {
+    fn count_inner(value: &serde_json::Value, count: &mut usize) {
+        match value {
+            serde_json::Value::Object(map) => {
+                if let (Some(serde_json::Value::Bool(true)), Some(_)) =
+                    (map.get(FD_PLACEHOLDER_KEY), map.get(FD_INDEX_KEY))
+                {
+                    *count += 1;
+                } else {
+                    for v in map.values() {
+                        count_inner(v, count);
+                    }
+                }
+            }
+            serde_json::Value::Array(arr) => {
+                for v in arr {
+                    count_inner(v, count);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut count = 0;
+    count_inner(value, &mut count);
+    count
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileDescriptorPlaceholder {
     #[serde(rename = "__jsonrpc_fd__")]
@@ -202,8 +230,7 @@ impl MessageWithFds {
     pub fn from_json_with_fds(json_str: &str, fds: Vec<OwnedFd>) -> Result<Self> {
         let message_json: serde_json::Value = serde_json::from_str(json_str)?;
 
-        let mut placeholder_count = 0;
-        Self::count_placeholders(&message_json, &mut placeholder_count);
+        let placeholder_count = count_fd_placeholders(&message_json);
 
         if placeholder_count != fds.len() {
             return Err(Error::MismatchedCount {
@@ -220,28 +247,6 @@ impl MessageWithFds {
 
         let message = JsonRpcMessage::from_json_value(message_json)?;
         Ok(Self::new(message, fds))
-    }
-
-    fn count_placeholders(value: &serde_json::Value, count: &mut usize) {
-        match value {
-            serde_json::Value::Object(map) => {
-                if let (Some(serde_json::Value::Bool(true)), Some(_)) =
-                    (map.get(FD_PLACEHOLDER_KEY), map.get(FD_INDEX_KEY))
-                {
-                    *count += 1;
-                } else {
-                    for v in map.values() {
-                        Self::count_placeholders(v, count);
-                    }
-                }
-            }
-            serde_json::Value::Array(arr) => {
-                for v in arr {
-                    Self::count_placeholders(v, count);
-                }
-            }
-            _ => {}
-        }
     }
 
     fn validate_placeholder_indices(

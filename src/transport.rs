@@ -1,5 +1,5 @@
 use crate::error::{Error, Result};
-use crate::message::{JsonRpcMessage, MessageWithFds, FD_INDEX_KEY, FD_PLACEHOLDER_KEY};
+use crate::message::{count_fd_placeholders, JsonRpcMessage, MessageWithFds};
 use rustix::fd::AsFd;
 use rustix::net::{
     RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags, SendAncillaryBuffer,
@@ -113,8 +113,9 @@ impl Receiver {
 
             trace!("Parsing message: {}", message_str);
 
-            let mut placeholder_count = 0;
-            Self::count_placeholders_in_str(message_str, &mut placeholder_count)?;
+            // Parse JSON once and reuse for both counting and message creation
+            let value: serde_json::Value = serde_json::from_str(message_str)?;
+            let placeholder_count = count_fd_placeholders(&value);
 
             if placeholder_count > self.fd_queue.len() {
                 return Err(Error::MismatchedCount {
@@ -127,47 +128,10 @@ impl Receiver {
                 .map(|_| self.fd_queue.pop_front().unwrap())
                 .collect();
 
-            if placeholder_count == 0 && !fds.is_empty() {
-                return Err(Error::DanglingFileDescriptors);
-            }
-
-            let message = self.parse_json_message(message_str)?;
+            let message = JsonRpcMessage::from_json_value(value)?;
             Ok(Some(MessageWithFds::new(message, fds)))
         } else {
             Ok(None)
-        }
-    }
-
-    fn parse_json_message(&self, json_str: &str) -> Result<JsonRpcMessage> {
-        let value: serde_json::Value = serde_json::from_str(json_str)?;
-        JsonRpcMessage::from_json_value(value)
-    }
-
-    fn count_placeholders_in_str(json_str: &str, count: &mut usize) -> Result<()> {
-        let value: serde_json::Value = serde_json::from_str(json_str)?;
-        Self::count_placeholders(&value, count);
-        Ok(())
-    }
-
-    fn count_placeholders(value: &serde_json::Value, count: &mut usize) {
-        match value {
-            serde_json::Value::Object(map) => {
-                if let (Some(serde_json::Value::Bool(true)), Some(_)) =
-                    (map.get(FD_PLACEHOLDER_KEY), map.get(FD_INDEX_KEY))
-                {
-                    *count += 1;
-                } else {
-                    for v in map.values() {
-                        Self::count_placeholders(v, count);
-                    }
-                }
-            }
-            serde_json::Value::Array(arr) => {
-                for v in arr {
-                    Self::count_placeholders(v, count);
-                }
-            }
-            _ => {}
         }
     }
 
