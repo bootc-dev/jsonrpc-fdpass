@@ -15,7 +15,8 @@ thiserror = "1.0"
 tokio = { version = "1.40", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
-jsonrpsee = { version = "0.24", features = ["server", "client-core"], default-features = false }
+jsonrpsee = { version = "0.24", features = ["server", "client-core", "async-client"], default-features = false }
 
 [dev-dependencies]
 tempfile = "3.0"
+async-trait = "0.1"
