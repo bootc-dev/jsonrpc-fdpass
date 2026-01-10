@@ -172,10 +172,22 @@ impl MessageWithFds {
     }
 
     pub fn serialize_with_placeholders(&self) -> Result<String> {
+        self.serialize_with_placeholders_impl(false)
+    }
+
+    pub fn serialize_with_placeholders_pretty(&self) -> Result<String> {
+        self.serialize_with_placeholders_impl(true)
+    }
+
+    fn serialize_with_placeholders_impl(&self, pretty: bool) -> Result<String> {
         let mut message_json = self.message.to_json_value()?;
         self.insert_placeholders(&mut message_json)?;
 
-        let json_str = serde_json::to_string(&message_json)?;
+        let json_str = if pretty {
+            serde_json::to_string_pretty(&message_json)?
+        } else {
+            serde_json::to_string(&message_json)?
+        };
         Ok(json_str)
     }
 

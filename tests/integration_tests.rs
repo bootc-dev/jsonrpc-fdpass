@@ -1634,3 +1634,254 @@ async fn test_malformed_placeholder_structure() -> Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_pretty_printed_json() -> Result<()> {
+    let temp_dir = TempDir::new().unwrap();
+    let socket_path = temp_dir.path().join("test_pretty.sock");
+
+    let listener = tokio::net::UnixListener::bind(&socket_path).unwrap();
+
+    let server_handle = tokio::spawn(async move {
+        let mut server = Server::new();
+
+        server.register_method("echo", |_method, params, _fds| Ok((params, Vec::new())));
+
+        if let Ok((stream, _)) = listener.accept().await {
+            let transport = UnixSocketTransport::new(stream).unwrap();
+            let (mut sender, mut receiver) = transport.split();
+
+            // Process multiple pretty-printed messages
+            for _ in 0..3 {
+                if let Ok(message_with_fds) = receiver.receive().await {
+                    let _ = server.process_message(message_with_fds, &mut sender).await;
+                }
+            }
+        }
+
+        Ok::<(), jsonrpc_fdpass::Error>(())
+    });
+
+    // Connect and send pretty-printed JSON directly
+    let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
+
+    use tokio::io::AsyncWriteExt;
+    let mut stream = stream;
+
+    // Send multiple pretty-printed JSON messages (with embedded newlines)
+    for i in 1..=3 {
+        let msg = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "echo",
+            "params": {
+                "message": format!("Pretty message {}", i),
+                "nested": {
+                    "key": "value",
+                    "number": i
+                }
+            },
+            "id": i
+        });
+
+        // Use pretty printing - this includes newlines within the JSON
+        let pretty_json = serde_json::to_string_pretty(&msg).unwrap();
+        assert!(
+            pretty_json.contains('\n'),
+            "Pretty JSON should contain newlines"
+        );
+
+        stream.write_all(pretty_json.as_bytes()).await.unwrap();
+        stream.flush().await.unwrap();
+    }
+
+    // Clean up
+    server_handle.abort();
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_concatenated_compact_json() -> Result<()> {
+    let temp_dir = TempDir::new().unwrap();
+    let socket_path = temp_dir.path().join("test_concat.sock");
+
+    let listener = tokio::net::UnixListener::bind(&socket_path).unwrap();
+
+    let server_handle = tokio::spawn(async move {
+        let mut server = Server::new();
+        let count = std::sync::Arc::new(std::sync::Mutex::new(0));
+        let count_clone = count.clone();
+
+        server.register_method("echo", move |_method, params, _fds| {
+            let mut c = count_clone.lock().unwrap();
+            *c += 1;
+            Ok((params, Vec::new()))
+        });
+
+        if let Ok((stream, _)) = listener.accept().await {
+            let transport = UnixSocketTransport::new(stream).unwrap();
+            let (mut sender, mut receiver) = transport.split();
+
+            // Process 3 messages
+            for _ in 0..3 {
+                if let Ok(message_with_fds) = receiver.receive().await {
+                    let _ = server.process_message(message_with_fds, &mut sender).await;
+                }
+            }
+
+            let final_count = *count.lock().unwrap();
+            assert_eq!(final_count, 3, "Should have processed 3 messages");
+        }
+
+        Ok::<(), jsonrpc_fdpass::Error>(())
+    });
+
+    // Connect and send concatenated compact JSON (no separators)
+    let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
+
+    use tokio::io::AsyncWriteExt;
+    let mut stream = stream;
+
+    // Build concatenated JSON without any separators
+    let mut concatenated = String::new();
+    for i in 1..=3 {
+        let msg = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "echo",
+            "params": { "id": i },
+            "id": i
+        });
+        // Compact JSON, no trailing newline
+        concatenated.push_str(&serde_json::to_string(&msg).unwrap());
+    }
+
+    // Verify no newlines in the concatenated string
+    assert!(
+        !concatenated.contains('\n'),
+        "Compact JSON should not contain newlines"
+    );
+
+    // Send all at once
+    stream.write_all(concatenated.as_bytes()).await.unwrap();
+    stream.flush().await.unwrap();
+
+    // Give server time to process
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    // Clean up
+    server_handle.abort();
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_mixed_pretty_and_compact_json() -> Result<()> {
+    let temp_dir = TempDir::new().unwrap();
+    let socket_path = temp_dir.path().join("test_mixed_format.sock");
+
+    let listener = tokio::net::UnixListener::bind(&socket_path).unwrap();
+
+    let server_handle = tokio::spawn(async move {
+        let mut server = Server::new();
+
+        server.register_method("echo", |_method, params, _fds| Ok((params, Vec::new())));
+
+        if let Ok((stream, _)) = listener.accept().await {
+            let transport = UnixSocketTransport::new(stream).unwrap();
+            let (mut sender, mut receiver) = transport.split();
+
+            // Process 4 messages with mixed formatting
+            for _ in 0..4 {
+                if let Ok(message_with_fds) = receiver.receive().await {
+                    let _ = server.process_message(message_with_fds, &mut sender).await;
+                }
+            }
+        }
+
+        Ok::<(), jsonrpc_fdpass::Error>(())
+    });
+
+    let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
+
+    use tokio::io::AsyncWriteExt;
+    let mut stream = stream;
+
+    // Alternate between pretty and compact formatting
+    for i in 1..=4 {
+        let msg = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "echo",
+            "params": { "iteration": i },
+            "id": i
+        });
+
+        let json_str = if i % 2 == 0 {
+            serde_json::to_string_pretty(&msg).unwrap()
+        } else {
+            serde_json::to_string(&msg).unwrap()
+        };
+
+        stream.write_all(json_str.as_bytes()).await.unwrap();
+        stream.flush().await.unwrap();
+    }
+
+    // Clean up
+    server_handle.abort();
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_sender_pretty_mode() -> Result<()> {
+    let temp_dir = TempDir::new().unwrap();
+    let socket_path = temp_dir.path().join("test_sender_pretty.sock");
+
+    let listener = tokio::net::UnixListener::bind(&socket_path).unwrap();
+
+    let server_handle = tokio::spawn(async move {
+        let mut server = Server::new();
+
+        server.register_method("echo", |_method, params, _fds| Ok((params, Vec::new())));
+
+        if let Ok((stream, _)) = listener.accept().await {
+            let transport = UnixSocketTransport::new(stream).unwrap();
+            let (mut sender, mut receiver) = transport.split();
+
+            // Process messages sent with pretty mode enabled
+            for _ in 0..3 {
+                if let Ok(message_with_fds) = receiver.receive().await {
+                    let _ = server.process_message(message_with_fds, &mut sender).await;
+                }
+            }
+        }
+
+        Ok::<(), jsonrpc_fdpass::Error>(())
+    });
+
+    let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
+    let transport = UnixSocketTransport::new(stream).unwrap();
+    let (mut sender, _receiver) = transport.split();
+
+    // Enable pretty printing via the official API
+    sender.set_pretty(true);
+
+    for i in 1..=3 {
+        let request = JsonRpcRequest::new(
+            "echo".to_string(),
+            Some(serde_json::json!({
+                "message": format!("Pretty mode message {}", i),
+                "nested": { "key": "value" }
+            })),
+            Value::Number(i.into()),
+        );
+        let message = JsonRpcMessage::Request(request);
+        let message_with_fds = MessageWithFds::new(message, vec![]);
+
+        sender.send(message_with_fds).await?;
+    }
+
+    // Clean up
+    server_handle.abort();
+
+    Ok(())
+}

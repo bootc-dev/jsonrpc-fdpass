@@ -33,6 +33,7 @@ impl UnixSocketTransport {
         (
             Sender {
                 stream: Arc::clone(&stream),
+                pretty: false,
             },
             Receiver {
                 stream,
@@ -45,11 +46,25 @@ impl UnixSocketTransport {
 
 pub struct Sender {
     stream: Arc<TokioUnixStream>,
+    pretty: bool,
 }
 
 impl Sender {
+    /// Enable or disable pretty-printed JSON output.
+    ///
+    /// When enabled, messages are serialized with indentation and newlines.
+    /// This is useful for debugging or when interoperating with tools that
+    /// expect human-readable JSON.
+    pub fn set_pretty(&mut self, pretty: bool) {
+        self.pretty = pretty;
+    }
+
     pub async fn send(&mut self, message_with_fds: MessageWithFds) -> Result<()> {
-        let serialized = message_with_fds.serialize_with_placeholders()?;
+        let serialized = if self.pretty {
+            message_with_fds.serialize_with_placeholders_pretty()?
+        } else {
+            message_with_fds.serialize_with_placeholders()?
+        };
         let data = serialized.into_bytes();
 
         trace!(
