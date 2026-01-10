@@ -1,8 +1,8 @@
 [package]
-name = "ndjson-rpc-fdpass"
+name = "jsonrpc-fdpass"
 version = "0.1.0"
 edition = "2021"
-description = "NDJSON JSON-RPC 2.0 with File Descriptor Passing implementation"
+description = "JSON-RPC 2.0 with Unix file descriptor passing"
 authors = ["Colin Walters <walters@verbum.org>"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/cgwalters/spec-json-rpc-fdpass"
@@ -15,5 +15,8 @@ thiserror = "1.0"
 tokio = { version = "1.40", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
+jsonrpsee = { version = "0.24", features = ["server", "client-core", "async-client"], default-features = false }
+
+[dev-dependencies]
 tempfile = "3.0"
-jsonrpsee = { version = "0.24", features = ["server", "client-core"], default-features = false }
+async-trait = "0.1"

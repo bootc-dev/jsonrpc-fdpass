@@ -1,14 +1,14 @@
-//! # NDJSON JSON-RPC 2.0 with File Descriptor Passing
+//! # JSON-RPC 2.0 with Unix File Descriptor Passing
 //!
-//! This crate provides an implementation of the NDJSON JSON-RPC 2.0 with File Descriptor Passing
-//! specification. It enables reliable inter-process communication (IPC) over Unix domain sockets
-//! with the ability to pass file descriptors alongside JSON-RPC messages.
+//! This crate provides an implementation of JSON-RPC 2.0 with file descriptor passing over Unix
+//! domain sockets. It enables reliable inter-process communication (IPC) with the ability to
+//! pass file descriptors alongside JSON-RPC messages.
 //!
 //! ## Features
 //!
 //! - **JSON-RPC 2.0 compliance**: Full support for requests, responses, and notifications
 //! - **File descriptor passing**: Pass file descriptors using Unix socket ancillary data
-//! - **NDJSON framing**: Newline-delimited JSON for reliable message boundaries
+//! - **Streaming JSON parsing**: Self-delimiting JSON messages without newline requirements
 //! - **Async support**: Built on tokio for high-performance async I/O
 //! - **Type-safe**: Rust's type system ensures correct message handling
 //!
@@ -17,7 +17,7 @@
 //! ### Server Example
 //!
 //! ```rust,no_run
-//! use ndjson_rpc_fdpass::{Server, Result};
+//! use jsonrpc_fdpass::{Server, Result};
 //! use std::fs::File;
 //! use serde_json::Value;
 //!
@@ -33,7 +33,7 @@
 //!             file.read_to_string(&mut contents).unwrap();
 //!             Ok((Some(Value::String(contents)), Vec::new()))
 //!         } else {
-//!             Err(ndjson_rpc_fdpass::Error::InvalidMessage("No FD provided".into()))
+//!             Err(jsonrpc_fdpass::Error::InvalidMessage("No FD provided".into()))
 //!         }
 //!     });
 //!     
@@ -44,7 +44,7 @@
 //! ### Client Example
 //!
 //! ```rust,no_run
-//! use ndjson_rpc_fdpass::{Client, Result};
+//! use jsonrpc_fdpass::{Client, Result};
 //! use std::fs::File;
 //! use std::os::unix::io::OwnedFd;
 //! use serde_json::json;
@@ -71,13 +71,15 @@
 //!
 //! ## Protocol Details
 //!
-//! This implementation follows the NDJSON JSON-RPC with File Descriptor Passing specification:
+//! This implementation is a minimal extension to JSON-RPC 2.0 that adds file descriptor
+//! passing over Unix domain sockets:
 //!
 //! - Uses Unix domain sockets (SOCK_STREAM)
-//! - Messages are framed using newline-delimited JSON (NDJSON)
-//! - File descriptors are passed using ancillary data via sendmsg(2)/recvmsg(2)
-//! - Each sendmsg() call contains exactly one complete NDJSON message
-//! - File descriptors are represented in JSON using placeholder objects
+//! - Standard JSON-RPC 2.0 message format with no additional framing requirements
+//! - JSON objects are self-delimiting; no newline or length-prefix framing is required
+//! - File descriptors are passed as ancillary data via sendmsg(2)/recvmsg(2)
+//! - Each sendmsg() call contains exactly one complete JSON-RPC message
+//! - File descriptors are represented in JSON using placeholder objects (see below)
 //!
 //! ### File Descriptor Placeholders
 //!

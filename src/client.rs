@@ -15,7 +15,7 @@ pub struct Client {
 impl Client {
     pub async fn connect<P: AsRef<Path>>(path: P) -> Result<Self> {
         let stream = UnixStream::connect(path).await?;
-        let transport = UnixSocketTransport::new(stream);
+        let transport = UnixSocketTransport::new(stream)?;
         let (sender, _receiver) = transport.split();
 
         Ok(Self { sender, next_id: 1 })

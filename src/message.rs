@@ -3,6 +3,41 @@ use jsonrpsee::types::error::ErrorObject as JsonRpcError;
 use serde::{Deserialize, Serialize};
 use std::os::unix::io::OwnedFd;
 
+/// The JSON key used to identify file descriptor placeholders.
+pub const FD_PLACEHOLDER_KEY: &str = "__jsonrpc_fd__";
+/// The JSON key for the file descriptor index within a placeholder.
+pub const FD_INDEX_KEY: &str = "index";
+/// The JSON-RPC protocol version.
+pub const JSONRPC_VERSION: &str = "2.0";
+
+/// Count file descriptor placeholders in a JSON value.
+pub fn count_fd_placeholders(value: &serde_json::Value) -> usize {
+    fn count_inner(value: &serde_json::Value, count: &mut usize) {
+        match value {
+            serde_json::Value::Object(map) => {
+                if let (Some(serde_json::Value::Bool(true)), Some(_)) =
+                    (map.get(FD_PLACEHOLDER_KEY), map.get(FD_INDEX_KEY))
+                {
+                    *count += 1;
+                } else {
+                    for v in map.values() {
+                        count_inner(v, count);
+                    }
+                }
+            }
+            serde_json::Value::Array(arr) => {
+                for v in arr {
+                    count_inner(v, count);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut count = 0;
+    count_inner(value, &mut count);
+    count
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileDescriptorPlaceholder {
     #[serde(rename = "__jsonrpc_fd__")]
@@ -55,7 +90,7 @@ pub enum JsonRpcMessage {
 impl JsonRpcRequest {
     pub fn new(method: String, params: Option<serde_json::Value>, id: serde_json::Value) -> Self {
         Self {
-            jsonrpc: "2.0".to_string(),
+            jsonrpc: JSONRPC_VERSION.to_string(),
             method,
             params,
             id,
@@ -66,7 +101,7 @@ impl JsonRpcRequest {
 impl JsonRpcResponse {
     pub fn success(result: serde_json::Value, id: serde_json::Value) -> Self {
         Self {
-            jsonrpc: "2.0".to_string(),
+            jsonrpc: JSONRPC_VERSION.to_string(),
             result: Some(result),
             error: None,
             id,
@@ -75,7 +110,7 @@ impl JsonRpcResponse {
 
     pub fn error(error: JsonRpcError<'static>, id: serde_json::Value) -> Self {
         Self {
-            jsonrpc: "2.0".to_string(),
+            jsonrpc: JSONRPC_VERSION.to_string(),
             result: None,
             error: Some(error),
             id,
@@ -86,7 +121,7 @@ impl JsonRpcResponse {
 impl JsonRpcNotification {
     pub fn new(method: String, params: Option<serde_json::Value>) -> Self {
         Self {
-            jsonrpc: "2.0".to_string(),
+            jsonrpc: JSONRPC_VERSION.to_string(),
             method,
             params,
         }
@@ -137,18 +172,30 @@ impl MessageWithFds {
     }
 
     pub fn serialize_with_placeholders(&self) -> Result<String> {
+        self.serialize_with_placeholders_impl(false)
+    }
+
+    pub fn serialize_with_placeholders_pretty(&self) -> Result<String> {
+        self.serialize_with_placeholders_impl(true)
+    }
+
+    fn serialize_with_placeholders_impl(&self, pretty: bool) -> Result<String> {
         let mut message_json = self.message.to_json_value()?;
         self.insert_placeholders(&mut message_json)?;
 
-        let json_str = serde_json::to_string(&message_json)?;
-        Ok(format!("{}\n", json_str))
+        let json_str = if pretty {
+            serde_json::to_string_pretty(&message_json)?
+        } else {
+            serde_json::to_string(&message_json)?
+        };
+        Ok(json_str)
     }
 
     fn insert_placeholders(&self, value: &mut serde_json::Value) -> Result<()> {
         let fd_count = self.file_descriptors.len();
         let mut placeholder_indices = Vec::new();
 
-        self.collect_placeholder_indices(value, &mut placeholder_indices);
+        Self::collect_placeholder_indices(value, &mut placeholder_indices);
 
         if placeholder_indices.len() != fd_count {
             return Err(Error::MismatchedCount {
@@ -166,26 +213,26 @@ impl MessageWithFds {
         Ok(())
     }
 
-    fn collect_placeholder_indices(&self, value: &serde_json::Value, indices: &mut Vec<usize>) {
+    fn collect_placeholder_indices(value: &serde_json::Value, indices: &mut Vec<usize>) {
         match value {
             serde_json::Value::Object(map) => {
                 if let (
                     Some(serde_json::Value::Bool(true)),
                     Some(serde_json::Value::Number(index)),
-                ) = (map.get("__jsonrpc_fd__"), map.get("index"))
+                ) = (map.get(FD_PLACEHOLDER_KEY), map.get(FD_INDEX_KEY))
                 {
                     if let Some(index) = index.as_u64() {
                         indices.push(index as usize);
                     }
                 } else {
                     for v in map.values() {
-                        self.collect_placeholder_indices(v, indices);
+                        Self::collect_placeholder_indices(v, indices);
                     }
                 }
             }
             serde_json::Value::Array(arr) => {
                 for v in arr {
-                    self.collect_placeholder_indices(v, indices);
+                    Self::collect_placeholder_indices(v, indices);
                 }
             }
             _ => {}
@@ -195,8 +242,7 @@ impl MessageWithFds {
     pub fn from_json_with_fds(json_str: &str, fds: Vec<OwnedFd>) -> Result<Self> {
         let message_json: serde_json::Value = serde_json::from_str(json_str)?;
 
-        let mut placeholder_count = 0;
-        Self::count_placeholders(&message_json, &mut placeholder_count);
+        let placeholder_count = count_fd_placeholders(&message_json);
 
         if placeholder_count != fds.len() {
             return Err(Error::MismatchedCount {
@@ -213,28 +259,6 @@ impl MessageWithFds {
 
         let message = JsonRpcMessage::from_json_value(message_json)?;
         Ok(Self::new(message, fds))
-    }
-
-    fn count_placeholders(value: &serde_json::Value, count: &mut usize) {
-        match value {
-            serde_json::Value::Object(map) => {
-                if let (Some(serde_json::Value::Bool(true)), Some(_)) =
-                    (map.get("__jsonrpc_fd__"), map.get("index"))
-                {
-                    *count += 1;
-                } else {
-                    for v in map.values() {
-                        Self::count_placeholders(v, count);
-                    }
-                }
-            }
-            serde_json::Value::Array(arr) => {
-                for v in arr {
-                    Self::count_placeholders(v, count);
-                }
-            }
-            _ => {}
-        }
     }
 
     fn validate_placeholder_indices(
@@ -260,7 +284,7 @@ impl MessageWithFds {
                 if let (
                     Some(serde_json::Value::Bool(true)),
                     Some(serde_json::Value::Number(index)),
-                ) = (map.get("__jsonrpc_fd__"), map.get("index"))
+                ) = (map.get(FD_PLACEHOLDER_KEY), map.get(FD_INDEX_KEY))
                 {
                     if let Some(index) = index.as_u64() {
                         indices.push(index as usize);
