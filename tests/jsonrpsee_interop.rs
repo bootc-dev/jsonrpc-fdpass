@@ -11,22 +11,12 @@ use jsonrpc_fdpass::{
     UnixSocketTransport,
 };
 use serde_json::Value;
-use std::io;
-use std::os::unix::net::UnixStream as StdUnixStream;
 use tokio::net::UnixStream;
-
-/// Create a connected pair of Unix streams using socketpair.
-fn create_socket_pair() -> io::Result<(UnixStream, UnixStream)> {
-    let (a, b) = StdUnixStream::pair()?;
-    a.set_nonblocking(true)?;
-    b.set_nonblocking(true)?;
-    Ok((UnixStream::from_std(a)?, UnixStream::from_std(b)?))
-}
 
 /// Test round-trip: our client -> our server, verifying wire format compatibility.
 #[tokio::test]
 async fn test_wire_format_round_trip() -> Result<()> {
-    let (client_stream, server_stream) = create_socket_pair().unwrap();
+    let (client_stream, server_stream) = UnixStream::pair().unwrap();
 
     // Start our server
     let server_handle = tokio::spawn(async move {
@@ -79,7 +69,7 @@ async fn test_wire_format_round_trip() -> Result<()> {
 /// Test that notifications work correctly (no response expected).
 #[tokio::test]
 async fn test_notification_no_response() -> Result<()> {
-    let (client_stream, server_stream) = create_socket_pair().unwrap();
+    let (client_stream, server_stream) = UnixStream::pair().unwrap();
 
     let received = std::sync::Arc::new(std::sync::Mutex::new(None));
     let received_clone = received.clone();
@@ -134,7 +124,7 @@ async fn test_notification_no_response() -> Result<()> {
 /// Test error responses are correctly formatted per JSON-RPC 2.0 spec.
 #[tokio::test]
 async fn test_error_response_format() -> Result<()> {
-    let (client_stream, server_stream) = create_socket_pair().unwrap();
+    let (client_stream, server_stream) = UnixStream::pair().unwrap();
 
     // Start our server
     let server_handle = tokio::spawn(async move {
@@ -180,7 +170,7 @@ async fn test_error_response_format() -> Result<()> {
 /// Test that batch requests work (send multiple messages in sequence).
 #[tokio::test]
 async fn test_sequential_requests() -> Result<()> {
-    let (client_stream, server_stream) = create_socket_pair().unwrap();
+    let (client_stream, server_stream) = UnixStream::pair().unwrap();
 
     // Start our server
     let server_handle = tokio::spawn(async move {
@@ -244,7 +234,7 @@ async fn test_sequential_requests() -> Result<()> {
 async fn test_parse_jsonrpsee_format_request() -> Result<()> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    let (mut client_stream, server_stream) = create_socket_pair().unwrap();
+    let (mut client_stream, server_stream) = UnixStream::pair().unwrap();
 
     // Spawn server to receive and echo
     let server_handle = tokio::spawn(async move {
@@ -345,7 +335,7 @@ async fn test_our_format_is_valid_jsonrpc() -> Result<()> {
 /// Test string ID handling (JSON-RPC allows string or number IDs).
 #[tokio::test]
 async fn test_string_id_handling() -> Result<()> {
-    let (client_stream, server_stream) = create_socket_pair().unwrap();
+    let (client_stream, server_stream) = UnixStream::pair().unwrap();
 
     let server_handle = tokio::spawn(async move {
         let mut server = jsonrpc_fdpass::Server::new();
@@ -392,7 +382,7 @@ async fn test_string_id_handling() -> Result<()> {
 /// Test null params handling.
 #[tokio::test]
 async fn test_null_params() -> Result<()> {
-    let (client_stream, server_stream) = create_socket_pair().unwrap();
+    let (client_stream, server_stream) = UnixStream::pair().unwrap();
 
     let server_handle = tokio::spawn(async move {
         let mut server = jsonrpc_fdpass::Server::new();
@@ -438,7 +428,7 @@ async fn test_null_params() -> Result<()> {
 /// Test array params (positional parameters as per JSON-RPC 2.0 spec).
 #[tokio::test]
 async fn test_array_params() -> Result<()> {
-    let (client_stream, server_stream) = create_socket_pair().unwrap();
+    let (client_stream, server_stream) = UnixStream::pair().unwrap();
 
     let server_handle = tokio::spawn(async move {
         let mut server = jsonrpc_fdpass::Server::new();
