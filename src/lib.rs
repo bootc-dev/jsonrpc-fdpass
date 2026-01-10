@@ -1,8 +1,8 @@
-//! # NDJSON JSON-RPC 2.0 with File Descriptor Passing
+//! # JSON-RPC 2.0 with Unix File Descriptor Passing
 //!
-//! This crate provides an implementation of the NDJSON JSON-RPC 2.0 with File Descriptor Passing
-//! specification. It enables reliable inter-process communication (IPC) over Unix domain sockets
-//! with the ability to pass file descriptors alongside JSON-RPC messages.
+//! This crate provides an implementation of JSON-RPC 2.0 with file descriptor passing over Unix
+//! domain sockets. It enables reliable inter-process communication (IPC) with the ability to
+//! pass file descriptors alongside JSON-RPC messages.
 //!
 //! ## Features
 //!
@@ -17,7 +17,7 @@
 //! ### Server Example
 //!
 //! ```rust,no_run
-//! use ndjson_rpc_fdpass::{Server, Result};
+//! use jsonrpc_fdpass::{Server, Result};
 //! use std::fs::File;
 //! use serde_json::Value;
 //!
@@ -33,7 +33,7 @@
 //!             file.read_to_string(&mut contents).unwrap();
 //!             Ok((Some(Value::String(contents)), Vec::new()))
 //!         } else {
-//!             Err(ndjson_rpc_fdpass::Error::InvalidMessage("No FD provided".into()))
+//!             Err(jsonrpc_fdpass::Error::InvalidMessage("No FD provided".into()))
 //!         }
 //!     });
 //!     
@@ -44,7 +44,7 @@
 //! ### Client Example
 //!
 //! ```rust,no_run
-//! use ndjson_rpc_fdpass::{Client, Result};
+//! use jsonrpc_fdpass::{Client, Result};
 //! use std::fs::File;
 //! use std::os::unix::io::OwnedFd;
 //! use serde_json::json;

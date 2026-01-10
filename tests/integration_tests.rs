@@ -1,4 +1,4 @@
-use ndjson_rpc_fdpass::{
+use jsonrpc_fdpass::{
     JsonRpcMessage, JsonRpcNotification, JsonRpcRequest, MessageWithFds, Result, Server,
     UnixSocketTransport,
 };
@@ -83,7 +83,7 @@ async fn test_client_server_communication() -> Result<()> {
             }
         }
 
-        Ok::<(), ndjson_rpc_fdpass::Error>(())
+        Ok::<(), jsonrpc_fdpass::Error>(())
     });
 
     // Connect and send request (no race condition)
@@ -134,7 +134,7 @@ async fn test_file_descriptor_passing() -> Result<()> {
 
         server.register_method("read_file", move |_method, _params, fds| {
             if fds.is_empty() {
-                return Err(ndjson_rpc_fdpass::Error::InvalidMessage(
+                return Err(jsonrpc_fdpass::Error::InvalidMessage(
                     "Expected file descriptor".to_string(),
                 ));
             }
@@ -162,7 +162,7 @@ async fn test_file_descriptor_passing() -> Result<()> {
             }
         }
 
-        Ok::<(), ndjson_rpc_fdpass::Error>(())
+        Ok::<(), jsonrpc_fdpass::Error>(())
     });
 
     // Connect and send file descriptor (no race condition)
@@ -224,7 +224,7 @@ async fn test_multiple_messages_with_fds_sequential() -> Result<()> {
             *count += 1;
 
             if fds.is_empty() {
-                return Err(ndjson_rpc_fdpass::Error::InvalidMessage(
+                return Err(jsonrpc_fdpass::Error::InvalidMessage(
                     "Expected file descriptor".to_string(),
                 ));
             }
@@ -264,7 +264,7 @@ async fn test_multiple_messages_with_fds_sequential() -> Result<()> {
             }
         }
 
-        Ok::<(), ndjson_rpc_fdpass::Error>(())
+        Ok::<(), jsonrpc_fdpass::Error>(())
     });
 
     // Connect and send multiple messages with file descriptors
@@ -357,7 +357,7 @@ async fn test_multiple_fds_single_message() -> Result<()> {
             }
         }
 
-        Ok::<(), ndjson_rpc_fdpass::Error>(())
+        Ok::<(), jsonrpc_fdpass::Error>(())
     });
 
     // Connect and send message with multiple file descriptors
@@ -457,7 +457,7 @@ async fn test_mixed_messages_with_and_without_fds() -> Result<()> {
             assert_eq!(message_count, 4);
         }
 
-        Ok::<(), ndjson_rpc_fdpass::Error>(())
+        Ok::<(), jsonrpc_fdpass::Error>(())
     });
 
     // Connect and send mixed messages
@@ -575,7 +575,7 @@ async fn test_large_number_of_fds() -> Result<()> {
             }
         }
 
-        Ok::<(), ndjson_rpc_fdpass::Error>(())
+        Ok::<(), jsonrpc_fdpass::Error>(())
     });
 
     // Connect and send message with many file descriptors
@@ -662,7 +662,7 @@ async fn test_zero_byte_files_with_fds() -> Result<()> {
             }
         }
 
-        Ok::<(), ndjson_rpc_fdpass::Error>(())
+        Ok::<(), jsonrpc_fdpass::Error>(())
     });
 
     // Connect and send message with empty file descriptors
@@ -756,7 +756,7 @@ async fn test_fd_placeholder_index_ordering() -> Result<()> {
             }
         }
 
-        Ok::<(), ndjson_rpc_fdpass::Error>(())
+        Ok::<(), jsonrpc_fdpass::Error>(())
     });
 
     // Connect and send message with FDs in specific order
@@ -842,7 +842,7 @@ async fn test_rapid_message_bursts() -> Result<()> {
             }
         }
 
-        Ok::<(), ndjson_rpc_fdpass::Error>(())
+        Ok::<(), jsonrpc_fdpass::Error>(())
     });
 
     // Connect and send burst of messages
@@ -959,7 +959,7 @@ async fn test_interleaved_requests_responses_notifications() -> Result<()> {
             }
         }
 
-        Ok::<(), ndjson_rpc_fdpass::Error>(())
+        Ok::<(), jsonrpc_fdpass::Error>(())
     });
 
     // Connect and send interleaved messages
@@ -1085,7 +1085,7 @@ async fn test_invalid_json_framing_error() -> Result<()> {
             }
         }
 
-        Ok::<(), ndjson_rpc_fdpass::Error>(())
+        Ok::<(), jsonrpc_fdpass::Error>(())
     });
 
     // Connect and send invalid JSON
@@ -1144,7 +1144,7 @@ async fn test_mismatched_fd_count_error() -> Result<()> {
             }
         }
 
-        Ok::<(), ndjson_rpc_fdpass::Error>(())
+        Ok::<(), jsonrpc_fdpass::Error>(())
     });
 
     // Connect and send message that claims 2 FDs but only provides 1
@@ -1223,7 +1223,7 @@ async fn test_invalid_placeholder_indices() -> Result<()> {
             }
         }
 
-        Ok::<(), ndjson_rpc_fdpass::Error>(())
+        Ok::<(), jsonrpc_fdpass::Error>(())
     });
 
     // Connect and send message with invalid placeholder indices (non-dense range)
@@ -1309,7 +1309,7 @@ async fn test_duplicate_placeholder_indices() -> Result<()> {
             }
         }
 
-        Ok::<(), ndjson_rpc_fdpass::Error>(())
+        Ok::<(), jsonrpc_fdpass::Error>(())
     });
 
     // Connect and send message with duplicate placeholder indices
@@ -1369,7 +1369,7 @@ async fn test_no_placeholders_but_fds_provided() -> Result<()> {
             // According to spec, this is non-compliant but may be handled
             // The FDs should be cleaned up
             if !fds.is_empty() {
-                return Err(ndjson_rpc_fdpass::Error::InvalidMessage(
+                return Err(jsonrpc_fdpass::Error::InvalidMessage(
                     "Received FDs but no placeholders in message".to_string(),
                 ));
             }
@@ -1396,7 +1396,7 @@ async fn test_no_placeholders_but_fds_provided() -> Result<()> {
             }
         }
 
-        Ok::<(), ndjson_rpc_fdpass::Error>(())
+        Ok::<(), jsonrpc_fdpass::Error>(())
     });
 
     // Connect and send message with FDs but no placeholders
@@ -1460,7 +1460,7 @@ async fn test_connection_drop_with_pending_fds() -> Result<()> {
             }
         }
 
-        Ok::<(), ndjson_rpc_fdpass::Error>(())
+        Ok::<(), jsonrpc_fdpass::Error>(())
     });
 
     // Connect and then immediately drop connection
@@ -1548,7 +1548,7 @@ async fn test_large_message_with_fds() -> Result<()> {
             }
         }
 
-        Ok::<(), ndjson_rpc_fdpass::Error>(())
+        Ok::<(), jsonrpc_fdpass::Error>(())
     });
 
     // Connect and send large message with FD
@@ -1604,7 +1604,7 @@ async fn test_malformed_placeholder_structure() -> Result<()> {
             }
         }
 
-        Ok::<(), ndjson_rpc_fdpass::Error>(())
+        Ok::<(), jsonrpc_fdpass::Error>(())
     });
 
     // Connect and send message with malformed placeholder

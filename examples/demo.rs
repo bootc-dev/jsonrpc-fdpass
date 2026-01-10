@@ -1,4 +1,4 @@
-use ndjson_rpc_fdpass::{Client, Result, Server};
+use jsonrpc_fdpass::{Client, Result, Server};
 use serde_json::Value;
 use std::fs::File;
 use std::io::{Read, Write};
@@ -33,7 +33,7 @@ async fn run_server(listener: UnixListener) -> Result<()> {
     // Register a method that reads from a file descriptor
     server.register_method("read_file", |_method, _params, fds| {
         if fds.is_empty() {
-            return Err(ndjson_rpc_fdpass::Error::InvalidMessage(
+            return Err(jsonrpc_fdpass::Error::InvalidMessage(
                 "Expected file descriptor".to_string(),
             ));
         }
@@ -43,7 +43,7 @@ async fn run_server(listener: UnixListener) -> Result<()> {
         let mut contents = String::new();
 
         file.read_to_string(&mut contents)
-            .map_err(ndjson_rpc_fdpass::Error::Io)?;
+            .map_err(jsonrpc_fdpass::Error::Io)?;
 
         info!("Server read from file: {}", contents.trim());
         Ok((Some(Value::String(contents)), Vec::new()))
@@ -63,7 +63,7 @@ async fn run_server(listener: UnixListener) -> Result<()> {
 
     // Accept one connection and handle it
     if let Ok((stream, _)) = listener.accept().await {
-        let transport = ndjson_rpc_fdpass::UnixSocketTransport::new(stream)?;
+        let transport = jsonrpc_fdpass::UnixSocketTransport::new(stream)?;
         let (mut sender, mut receiver) = transport.split();
 
         // Handle messages from this connection
@@ -85,7 +85,7 @@ async fn run_client(socket_path: PathBuf) -> Result<()> {
     let mut client = Client::connect(&socket_path).await?;
 
     // Create a temporary file to send to the server
-    let mut temp_file = tempfile::NamedTempFile::new().map_err(ndjson_rpc_fdpass::Error::Io)?;
+    let mut temp_file = tempfile::NamedTempFile::new().map_err(jsonrpc_fdpass::Error::Io)?;
 
     write!(temp_file, "Hello from client file!").unwrap();
     temp_file.flush().unwrap();

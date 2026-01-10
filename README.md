@@ -1,4 +1,8 @@
-# A Specification for NDJSON JSON-RPC 2.0 with File Descriptor Passing (NDJSON-RPC-FD)
+# JSON-RPC 2.0 with Unix File Descriptor Passing
+
+This repository contains both a protocol specification and a Rust implementation
+(`jsonrpc-fdpass` crate) for JSON-RPC 2.0 with file descriptor passing over Unix
+domain sockets.
 
 ## 1. Overview
 
