@@ -30,7 +30,7 @@ Third, the pipe management system using `pipeid` tracking creates unnecessary co
 
 The migration addresses these limitations through three key architectural changes:
 
-**Transport Evolution:** Moving from SOCK_SEQPACKET to SOCK_STREAM with NDJSON framing removes the 32KB limitation while providing reliable message boundaries. This change enables handling of arbitrarily large manifests and complex metadata structures.
+**Transport Evolution:** Moving from SOCK_SEQPACKET to SOCK_STREAM with streaming JSON parsing removes the 32KB limitation while providing reliable message boundaries. This change enables handling of arbitrarily large manifests and complex metadata structures.
 
 **Standards Compliance:** Adopting JSON-RPC 2.0 provides immediate access to existing tooling, debugging capabilities, and client libraries. The structured parameter approach replaces error-prone positional arguments with named parameters that improve type safety.
 
@@ -81,7 +81,7 @@ The migration addresses these limitations through three key architectural change
 
 This migration delivers measurable improvements in four key areas:
 
-**Reliability:** SOCK_STREAM transport with NDJSON framing eliminates message size limitations that currently prevent handling of large multi-architecture manifests.
+**Reliability:** SOCK_STREAM transport with streaming JSON parsing eliminates message size limitations that currently prevent handling of large multi-architecture manifests.
 
 **Portability:** SOCK_SEQPACKET availability varies across POSIX systems, particularly macOS. SOCK_STREAM provides universal compatibility.
 
@@ -224,7 +224,7 @@ This migration delivers measurable improvements in four key areas:
 
 The migration follows a structured four-phase approach designed to minimize disruption while ensuring thorough validation:
 
-**Infrastructure Phase (Weeks 1-2):** Establish the JSON-RPC 2.0 foundation with NDJSON framing and file descriptor placeholder systems. This phase focuses on the transport layer changes that enable all subsequent improvements.
+**Infrastructure Phase (Weeks 1-2):** Establish the JSON-RPC 2.0 foundation with streaming JSON parsing and file descriptor placeholder systems. This phase focuses on the transport layer changes that enable all subsequent improvements.
 
 **Method Migration Phase (Weeks 3-4):** Systematically convert each existing method to the new format. Priority goes to high-usage methods like `GetBlob` and `GetManifest`, with careful attention to maintaining semantic equivalence.
 

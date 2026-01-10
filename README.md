@@ -8,7 +8,7 @@ domain sockets.
 
 This document specifies a variant of the JSON-RPC 2.0 protocol designed for reliable inter-process communication (IPC) over stream-oriented sockets. It is intended for use on POSIX-compliant systems where SOCK_SEQPACKET is unavailable (such as macOS) or undesirable.
 
-It uses Unix domain sockets of type SOCK_STREAM, mandates Newline Delimited JSON (NDJSON) for message framing, and extends the JSON-RPC 2.0 data model to support passing file descriptors using ancillary data.
+It uses Unix domain sockets of type SOCK_STREAM, leverages JSON's self-delimiting nature for message framing, and extends the JSON-RPC 2.0 data model to support passing file descriptors using ancillary data.
 
 The primary design goal is to provide a portable, unambiguous protocol for passing file descriptors alongside structured JSON messages over a standard byte stream.
 
@@ -22,22 +22,21 @@ The transport for this protocol MUST be a Unix domain socket created with the ty
 
 ### 2.2. Message Framing
 
-All JSON-RPC messages MUST be framed using the Newline Delimited JSON (NDJSON) format.
+JSON is a self-delimiting format—a compliant parser can determine where one JSON value ends and the next begins without external delimiters. This protocol leverages streaming JSON parsing for message framing.
 
-* Each JSON message MUST be a single line of text.
 * The JSON text MUST be encoded using UTF-8.
-* Each line MUST be terminated by a single newline character (`\n`, ASCII 0x0A).
-* Carriage returns (`\r`) MUST NOT be used.
+* Each message MUST be a complete, valid JSON object.
+* Whitespace between messages is permitted but not required.
 
 ### 2.3. Transmission Rule
 
 To unambiguously associate file descriptors with their corresponding message, a sending party **MUST** adhere to the following rule:
 
-**A single sendmsg(2) system call MUST contain exactly one and only one complete NDJSON message** (the JSON text and its terminating newline character).
+**A single sendmsg(2) system call MUST contain exactly one and only one complete JSON-RPC message.**
 
-File descriptors intended for that message MUST be included as ancillary data in that same sendmsg() call. A sendmsg() call that includes file descriptors MUST also contain a complete NDJSON message.
+File descriptors intended for that message MUST be included as ancillary data in that same sendmsg() call. A sendmsg() call that includes file descriptors MUST also contain a complete JSON-RPC message.
 
-* **Rationale:** This strict 1:1 mapping between a sendmsg() call, a single NDJSON message, and its associated file descriptors is the core of the protocol. It leverages the kernel's guarantee that data and ancillary data from a single sendmsg call are delivered atomically to the underlying transport. This allows the receiver to reliably associate FDs with messages even if multiple messages are coalesced in the stream.
+* **Rationale:** This strict 1:1 mapping between a sendmsg() call, a single JSON-RPC message, and its associated file descriptors is the core of the protocol. It leverages the kernel's guarantee that data and ancillary data from a single sendmsg call are delivered atomically to the underlying transport. This allows the receiver to reliably associate FDs with messages even if multiple messages are coalesced in the stream.
 
 ## 3. Message Format
 
@@ -81,14 +80,13 @@ Because SOCK_STREAM does not preserve message boundaries, the receiver MUST impl
 2. **Reading:** When the recvmsg(2) system call returns data, any received bytes MUST be appended to the end of the byte buffer. Any received file descriptors MUST be enqueued, in the order they were provided by the system call, to the back of the file descriptor queue.
 
 3. **Processing Loop:** The receiver MUST process the byte buffer by repeatedly performing the following steps until no more complete messages can be extracted:
-   1. **Scan for Delimiter:** Scan the byte buffer for the first occurrence of a newline character (`\n`). If none is found, the processing loop terminates until more data is received.
-   2. **Extract Message Bytes:** Extract the sequence of bytes from the start of the buffer up to and including the newline character.
-   3. **Parse Message:** Attempt to parse the extracted bytes (excluding the newline) as a JSON object. If parsing fails, this is a fatal Framing Error (see Section 7), and the connection MUST be closed.
-   4. **Count Placeholders:** Count the number of File Descriptor Placeholders (N) within the parsed JSON message.
-   5. **Check FD Queue:** Check if the file descriptor queue contains at least N FDs. If it contains fewer than N FDs, this is a fatal Mismatched Count error (see Section 7). The protocol state is desynchronized, and the connection MUST be closed.
-   6. **Dequeue and Associate:** Dequeue the first N file descriptors from the front of the queue. These FDs correspond, in order, to the placeholders with indices 0 through N-1. The receiver MUST substitute the placeholder objects in its internal representation of the message with these actual file descriptor values.
-   7. **Dispatch:** The fully-formed message (with FDs) is now ready and SHOULD be dispatched to the application logic for handling.
-   8. **Consume Bytes:** The extracted message bytes (including the newline) MUST be removed from the front of the byte buffer.
+   1. **Streaming Parse:** Attempt to parse a complete JSON object from the beginning of the byte buffer using a streaming JSON parser. If the buffer contains an incomplete JSON value (e.g., the parser encounters EOF mid-value), the processing loop terminates until more data is received.
+   2. **Handle Parse Result:** If parsing succeeds, record the number of bytes consumed. If parsing fails with a syntax error (not EOF), this is a fatal Framing Error (see Section 7), and the connection MUST be closed.
+   3. **Count Placeholders:** Count the number of File Descriptor Placeholders (N) within the parsed JSON message.
+   4. **Check FD Queue:** Check if the file descriptor queue contains at least N FDs. If it contains fewer than N FDs, this is a fatal Mismatched Count error (see Section 7). The protocol state is desynchronized, and the connection MUST be closed.
+   5. **Dequeue and Associate:** Dequeue the first N file descriptors from the front of the queue. These FDs correspond, in order, to the placeholders with indices 0 through N-1. The receiver MUST substitute the placeholder objects in its internal representation of the message with these actual file descriptor values.
+   6. **Dispatch:** The fully-formed message (with FDs) is now ready and SHOULD be dispatched to the application logic for handling.
+   7. **Consume Bytes:** The consumed bytes MUST be removed from the front of the byte buffer.
 
 This algorithmic approach ensures that file descriptors are always correctly matched to their corresponding messages, even when multiple messages are received in a single recvmsg() call.
 
@@ -101,19 +99,18 @@ A client asks a server to write to a file.
 **Client-side Action:**
 
 1. Open a file, yielding fd = 5.
-2. Construct the JSON payload string:
+2. Construct the JSON payload:
    ```json
    {"jsonrpc":"2.0","method":"writeFile","params":{"file":{"__jsonrpc_fd__":true,"index":0},"data":"..."},"id":1}
    ```
-3. Prepare the data for sending: payload_string + "\n"
-4. Call sendmsg() with the final data buffer and one control message containing the file descriptor 5.
+3. Call sendmsg() with the JSON payload and one control message containing the file descriptor 5.
 
 **Server-side Action:**
 
 1. Call recvmsg(), receiving a data chunk and the file descriptor 5.
 2. Append the data to its byte buffer. Enqueue 5 into its FD queue.
-3. Begin the processing loop. It finds a newline.
-4. It extracts and parses the JSON message. It counts N=1 placeholder.
+3. Begin the processing loop. The streaming parser finds a complete JSON object.
+4. It parses the JSON message. It counts N=1 placeholder.
 5. It checks that the FD queue size is >= 1. It is.
 6. It dequeues the FD 5 and associates it with the message.
 7. The complete message is dispatched. The processed bytes are removed from the buffer.
@@ -130,7 +127,7 @@ The primary error code for these issues is:
 
 **Conditions that MUST be treated as fatal errors:**
 
-* **Framing Error:** A received line of text (terminated by `\n`) cannot be parsed as valid JSON.
+* **Framing Error:** The byte stream cannot be parsed as valid JSON (syntax error, not incomplete data).
 * **Mismatched Count:** A parsed message requires N file descriptors, but the receiver's file descriptor queue contains fewer than N available FDs at the time of processing.
 * **Invalid Placeholders:** The index values in a message's placeholders are not unique or do not form a dense range 0..N-1.
 * **Dangling File Descriptors:** A message contains zero placeholders, but file descriptors were received with it. This is implicitly handled by the receiver logic, but a sender that does this is non-compliant.
