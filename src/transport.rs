@@ -12,6 +12,11 @@ use std::sync::{Arc, Mutex};
 use tokio::net::UnixStream as TokioUnixStream;
 use tracing::{debug, trace};
 
+/// Maximum number of file descriptors per message.
+const MAX_FDS_PER_MESSAGE: usize = 8;
+/// Read buffer size for incoming data.
+const READ_BUFFER_SIZE: usize = 4096;
+
 pub struct UnixSocketTransport {
     fd: OwnedFd,
 }
@@ -68,7 +73,8 @@ impl Sender {
                 // Convert OwnedFd to BorrowedFd for sending
                 let borrowed_fds: Vec<_> = fds.iter().map(|fd| fd.as_fd()).collect();
 
-                let mut buffer: Vec<u8> = vec![0u8; rustix::cmsg_space!(ScmRights(8))];
+                let mut buffer: Vec<u8> =
+                    vec![0u8; rustix::cmsg_space!(ScmRights(MAX_FDS_PER_MESSAGE))];
                 let mut control = SendAncillaryBuffer::new(buffer.as_mut_slice());
 
                 if !control.push(SendAncillaryMessage::ScmRights(&borrowed_fds)) {
@@ -140,9 +146,10 @@ impl Receiver {
 
         let (bytes_read, data, fds) = tokio::task::spawn_blocking(move || {
             let sockfd = fd.lock().unwrap();
-            let mut data_buffer = [0u8; 4096];
+            let mut data_buffer = [0u8; READ_BUFFER_SIZE];
             let mut iov = [IoSliceMut::new(&mut data_buffer)];
-            let mut cmsg_space: Vec<u8> = vec![0u8; rustix::cmsg_space!(ScmRights(8))];
+            let mut cmsg_space: Vec<u8> =
+                vec![0u8; rustix::cmsg_space!(ScmRights(MAX_FDS_PER_MESSAGE))];
             let mut cmsg_buffer = RecvAncillaryBuffer::new(cmsg_space.as_mut_slice());
 
             let result = rustix::net::recvmsg(
