@@ -75,36 +75,66 @@ impl Sender {
 
         let fds = message_with_fds.file_descriptors;
 
-        self.stream
-            .async_io(Interest::WRITABLE, || {
-                let sockfd = self.stream.as_fd();
+        // Track how many bytes we've sent so far
+        let mut bytes_sent = 0usize;
+        // FDs are only sent with the first sendmsg call
+        let mut fds_sent = false;
 
-                if fds.is_empty() {
-                    // No file descriptors to send - use regular send
-                    rustix::net::send(sockfd, &data, SendFlags::empty())
-                        .map_err(|e| to_io_error(e, "send"))?;
-                } else {
-                    // Convert OwnedFd to BorrowedFd for sending
-                    let borrowed_fds: Vec<_> = fds.iter().map(|fd| fd.as_fd()).collect();
+        while bytes_sent < data.len() {
+            let remaining = &data[bytes_sent..];
 
-                    let mut buffer: Vec<u8> =
-                        vec![0u8; rustix::cmsg_space!(ScmRights(MAX_FDS_PER_MESSAGE))];
-                    let mut control = SendAncillaryBuffer::new(buffer.as_mut_slice());
+            let sent = self
+                .stream
+                .async_io(Interest::WRITABLE, || {
+                    let sockfd = self.stream.as_fd();
 
-                    if !control.push(SendAncillaryMessage::ScmRights(&borrowed_fds)) {
-                        return Err(io::Error::other(
-                            "Failed to add file descriptors to control message",
-                        ));
+                    if !fds_sent && !fds.is_empty() {
+                        // First chunk with FDs: use sendmsg with ancillary data
+                        let borrowed_fds: Vec<_> = fds.iter().map(|fd| fd.as_fd()).collect();
+
+                        let mut buffer: Vec<u8> =
+                            vec![0u8; rustix::cmsg_space!(ScmRights(MAX_FDS_PER_MESSAGE))];
+                        let mut control = SendAncillaryBuffer::new(buffer.as_mut_slice());
+
+                        if !control.push(SendAncillaryMessage::ScmRights(&borrowed_fds)) {
+                            return Err(io::Error::other(
+                                "Failed to add file descriptors to control message",
+                            ));
+                        }
+
+                        let iov = [IoSlice::new(remaining)];
+                        let sent =
+                            rustix::net::sendmsg(sockfd, &iov, &mut control, SendFlags::empty())
+                                .map_err(|e| to_io_error(e, "sendmsg"))?;
+
+                        Ok(sent)
+                    } else {
+                        // No FDs or FDs already sent: use regular send
+                        let sent = rustix::net::send(sockfd, remaining, SendFlags::empty())
+                            .map_err(|e| to_io_error(e, "send"))?;
+                        Ok(sent)
                     }
+                })
+                .await
+                .map_err(Error::Io)?;
 
-                    let iov = [IoSlice::new(&data)];
-                    rustix::net::sendmsg(sockfd, &iov, &mut control, SendFlags::empty())
-                        .map_err(|e| to_io_error(e, "sendmsg"))?;
-                }
-                Ok(())
-            })
-            .await
-            .map_err(Error::Io)
+            bytes_sent += sent;
+
+            // Mark FDs as sent after first successful sendmsg
+            if !fds_sent && !fds.is_empty() {
+                fds_sent = true;
+                trace!("Sent {} FDs with first chunk ({} bytes)", fds.len(), sent);
+            }
+
+            trace!(
+                "Sent {}/{} bytes (this chunk: {})",
+                bytes_sent,
+                data.len(),
+                sent
+            );
+        }
+
+        Ok(())
     }
 }
 

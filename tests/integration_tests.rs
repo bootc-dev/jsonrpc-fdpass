@@ -1885,3 +1885,142 @@ async fn test_sender_pretty_mode() -> Result<()> {
 
     Ok(())
 }
+
+/// Test that large messages exceeding kernel buffer size are sent correctly.
+///
+/// This reproduces a bug where partial writes from sendmsg() were not handled,
+/// causing large messages to be truncated.
+#[tokio::test]
+async fn test_large_message_exceeds_kernel_buffer() -> Result<()> {
+    // Create a large payload that will exceed the typical kernel socket buffer
+    // (usually ~200KB). We'll use 1MB to be safe.
+    let large_data = "x".repeat(1024 * 1024);
+
+    let (client_stream, server_stream) = tokio::net::UnixStream::pair().unwrap();
+
+    let expected_data = large_data.clone();
+    let server_handle = tokio::spawn(async move {
+        let transport = UnixSocketTransport::new(server_stream).unwrap();
+        let (_sender, mut receiver) = transport.split();
+
+        let message_with_fds = receiver.receive().await?;
+        let message = message_with_fds.message;
+
+        // Verify we received the complete message
+        if let JsonRpcMessage::Request(req) = message {
+            let params = req.params.unwrap();
+            let received_data = params["data"].as_str().unwrap();
+            assert_eq!(
+                received_data.len(),
+                expected_data.len(),
+                "Message was truncated! Expected {} bytes, got {} bytes",
+                expected_data.len(),
+                received_data.len()
+            );
+            assert_eq!(received_data, expected_data);
+        } else {
+            panic!("Expected request message");
+        }
+
+        Ok::<(), jsonrpc_fdpass::Error>(())
+    });
+
+    let transport = UnixSocketTransport::new(client_stream).unwrap();
+    let (mut sender, _receiver) = transport.split();
+
+    let request = JsonRpcRequest::new(
+        "large_data".to_string(),
+        Some(serde_json::json!({
+            "data": large_data
+        })),
+        Value::Number(1.into()),
+    );
+    let message = JsonRpcMessage::Request(request);
+    let message_with_fds = MessageWithFds::new(message, vec![]);
+
+    sender.send(message_with_fds).await?;
+
+    // Wait for server to process and verify
+    server_handle.await.unwrap()?;
+
+    Ok(())
+}
+
+/// Test that large messages with file descriptors work correctly.
+///
+/// This tests the case where FDs must be sent with the first chunk,
+/// and remaining data sent in subsequent chunks.
+#[tokio::test]
+async fn test_large_message_with_fd() -> Result<()> {
+    // Create a large payload
+    let large_data = "y".repeat(1024 * 1024);
+
+    // Create a temp file to pass
+    let mut temp_file = NamedTempFile::new().unwrap();
+    write!(temp_file, "FD test content").unwrap();
+    temp_file.flush().unwrap();
+    temp_file.seek(SeekFrom::Start(0)).unwrap();
+    let fd: OwnedFd = temp_file.into_file().into();
+
+    let (client_stream, server_stream) = tokio::net::UnixStream::pair().unwrap();
+
+    let expected_data = large_data.clone();
+    let server_handle = tokio::spawn(async move {
+        let transport = UnixSocketTransport::new(server_stream).unwrap();
+        let (_sender, mut receiver) = transport.split();
+
+        let message_with_fds = receiver.receive().await?;
+        let message = message_with_fds.message;
+        let fds = message_with_fds.file_descriptors;
+
+        // Verify we received the FD
+        assert_eq!(fds.len(), 1, "Expected 1 file descriptor");
+
+        // Verify we can read from the FD
+        let mut file = File::from(fds.into_iter().next().unwrap());
+        let mut contents = String::new();
+        file.read_to_string(&mut contents).unwrap();
+        assert_eq!(contents, "FD test content");
+
+        // Verify we received the complete message
+        if let JsonRpcMessage::Request(req) = message {
+            let params = req.params.unwrap();
+            let received_data = params["data"].as_str().unwrap();
+            assert_eq!(
+                received_data.len(),
+                expected_data.len(),
+                "Message was truncated! Expected {} bytes, got {} bytes",
+                expected_data.len(),
+                received_data.len()
+            );
+        } else {
+            panic!("Expected request message");
+        }
+
+        Ok::<(), jsonrpc_fdpass::Error>(())
+    });
+
+    let transport = UnixSocketTransport::new(client_stream).unwrap();
+    let (mut sender, _receiver) = transport.split();
+
+    let request = JsonRpcRequest::new(
+        "large_data_with_fd".to_string(),
+        Some(serde_json::json!({
+            "data": large_data,
+            "file": {
+                "__jsonrpc_fd__": true,
+                "index": 0
+            }
+        })),
+        Value::Number(1.into()),
+    );
+    let message = JsonRpcMessage::Request(request);
+    let message_with_fds = MessageWithFds::new(message, vec![fd]);
+
+    sender.send(message_with_fds).await?;
+
+    // Wait for server to process and verify
+    server_handle.await.unwrap()?;
+
+    Ok(())
+}

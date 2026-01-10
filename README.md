@@ -28,15 +28,11 @@ JSON is a self-delimiting format—a compliant parser can determine where one JS
 * Each message MUST be a complete, valid JSON object.
 * Whitespace between messages is permitted but not required.
 
-### 2.3. Transmission Rule
+### 2.3. Transmission Rules
 
-To unambiguously associate file descriptors with their corresponding message, a sending party **MUST** adhere to the following rule:
+To ensure file descriptors are correctly associated with their corresponding messages, a sending party MUST adhere to the following rules:
 
-**A single sendmsg(2) system call MUST contain exactly one and only one complete JSON-RPC message.**
-
-File descriptors intended for that message MUST be included as ancillary data in that same sendmsg() call. A sendmsg() call that includes file descriptors MUST also contain a complete JSON-RPC message.
-
-* **Rationale:** This strict 1:1 mapping between a sendmsg() call, a single JSON-RPC message, and its associated file descriptors is the core of the protocol. It leverages the kernel's guarantee that data and ancillary data from a single sendmsg call are delivered atomically to the underlying transport. This allows the receiver to reliably associate FDs with messages even if multiple messages are coalesced in the stream.
+1. **File Descriptor Ordering:** All file descriptors referenced by a message MUST be sent (via ancillary data) before or with the final bytes of that message. The receiver dequeues FDs in order as complete messages are parsed; if the required FDs have not yet arrived, the connection is terminated with a Mismatched Count error.
 
 ## 3. Message Format
 
