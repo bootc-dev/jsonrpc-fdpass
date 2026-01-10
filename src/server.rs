@@ -68,7 +68,7 @@ impl Server {
     }
 
     async fn handle_connection(&self, stream: UnixStream) -> Result<()> {
-        let transport = UnixSocketTransport::new(stream);
+        let transport = UnixSocketTransport::new(stream)?;
         let (mut sender, mut receiver) = transport.split();
 
         debug!("New connection established");

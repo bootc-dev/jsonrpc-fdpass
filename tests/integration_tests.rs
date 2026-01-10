@@ -75,7 +75,7 @@ async fn test_client_server_communication() -> Result<()> {
         server.register_method("echo", |_method, params, _fds| Ok((params, Vec::new())));
 
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream);
+            let transport = UnixSocketTransport::new(stream).unwrap();
             let (mut sender, mut receiver) = transport.split();
 
             if let Ok(message_with_fds) = receiver.receive().await {
@@ -88,7 +88,7 @@ async fn test_client_server_communication() -> Result<()> {
 
     // Connect and send request (no race condition)
     let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
-    let transport = UnixSocketTransport::new(stream);
+    let transport = UnixSocketTransport::new(stream).unwrap();
     let (mut sender, _receiver) = transport.split();
 
     let request = JsonRpcRequest::new(
@@ -154,7 +154,7 @@ async fn test_file_descriptor_passing() -> Result<()> {
         });
 
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream);
+            let transport = UnixSocketTransport::new(stream).unwrap();
             let (mut sender, mut receiver) = transport.split();
 
             if let Ok(message_with_fds) = receiver.receive().await {
@@ -167,7 +167,7 @@ async fn test_file_descriptor_passing() -> Result<()> {
 
     // Connect and send file descriptor (no race condition)
     let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
-    let transport = UnixSocketTransport::new(stream);
+    let transport = UnixSocketTransport::new(stream).unwrap();
     let (mut sender, _receiver) = transport.split();
 
     // Create params with file descriptor placeholder
@@ -253,7 +253,7 @@ async fn test_multiple_messages_with_fds_sequential() -> Result<()> {
         });
 
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream);
+            let transport = UnixSocketTransport::new(stream).unwrap();
             let (mut sender, mut receiver) = transport.split();
 
             // Process multiple messages sequentially
@@ -269,7 +269,7 @@ async fn test_multiple_messages_with_fds_sequential() -> Result<()> {
 
     // Connect and send multiple messages with file descriptors
     let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
-    let transport = UnixSocketTransport::new(stream);
+    let transport = UnixSocketTransport::new(stream).unwrap();
     let (mut sender, _receiver) = transport.split();
 
     // Send multiple messages sequentially
@@ -349,7 +349,7 @@ async fn test_multiple_fds_single_message() -> Result<()> {
         });
 
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream);
+            let transport = UnixSocketTransport::new(stream).unwrap();
             let (mut sender, mut receiver) = transport.split();
 
             if let Ok(message_with_fds) = receiver.receive().await {
@@ -362,7 +362,7 @@ async fn test_multiple_fds_single_message() -> Result<()> {
 
     // Connect and send message with multiple file descriptors
     let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
-    let transport = UnixSocketTransport::new(stream);
+    let transport = UnixSocketTransport::new(stream).unwrap();
     let (mut sender, _receiver) = transport.split();
 
     // Create params with multiple file descriptor placeholders
@@ -443,7 +443,7 @@ async fn test_mixed_messages_with_and_without_fds() -> Result<()> {
         });
 
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream);
+            let transport = UnixSocketTransport::new(stream).unwrap();
             let (mut sender, mut receiver) = transport.split();
 
             // Process multiple mixed messages
@@ -462,7 +462,7 @@ async fn test_mixed_messages_with_and_without_fds() -> Result<()> {
 
     // Connect and send mixed messages
     let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
-    let transport = UnixSocketTransport::new(stream);
+    let transport = UnixSocketTransport::new(stream).unwrap();
     let (mut sender, _receiver) = transport.split();
 
     // 1. Echo message (no FD)
@@ -567,7 +567,7 @@ async fn test_large_number_of_fds() -> Result<()> {
         });
 
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream);
+            let transport = UnixSocketTransport::new(stream).unwrap();
             let (mut sender, mut receiver) = transport.split();
 
             if let Ok(message_with_fds) = receiver.receive().await {
@@ -580,7 +580,7 @@ async fn test_large_number_of_fds() -> Result<()> {
 
     // Connect and send message with many file descriptors
     let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
-    let transport = UnixSocketTransport::new(stream);
+    let transport = UnixSocketTransport::new(stream).unwrap();
     let (mut sender, _receiver) = transport.split();
 
     // Create params with many file descriptor placeholders
@@ -654,7 +654,7 @@ async fn test_zero_byte_files_with_fds() -> Result<()> {
         });
 
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream);
+            let transport = UnixSocketTransport::new(stream).unwrap();
             let (mut sender, mut receiver) = transport.split();
 
             if let Ok(message_with_fds) = receiver.receive().await {
@@ -667,7 +667,7 @@ async fn test_zero_byte_files_with_fds() -> Result<()> {
 
     // Connect and send message with empty file descriptors
     let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
-    let transport = UnixSocketTransport::new(stream);
+    let transport = UnixSocketTransport::new(stream).unwrap();
     let (mut sender, _receiver) = transport.split();
 
     let params = serde_json::json!({
@@ -748,7 +748,7 @@ async fn test_fd_placeholder_index_ordering() -> Result<()> {
         });
 
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream);
+            let transport = UnixSocketTransport::new(stream).unwrap();
             let (mut sender, mut receiver) = transport.split();
 
             if let Ok(message_with_fds) = receiver.receive().await {
@@ -761,7 +761,7 @@ async fn test_fd_placeholder_index_ordering() -> Result<()> {
 
     // Connect and send message with FDs in specific order
     let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
-    let transport = UnixSocketTransport::new(stream);
+    let transport = UnixSocketTransport::new(stream).unwrap();
     let (mut sender, _receiver) = transport.split();
 
     // Create params with placeholders in non-sequential order to test protocol
@@ -831,7 +831,7 @@ async fn test_rapid_message_bursts() -> Result<()> {
         });
 
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream);
+            let transport = UnixSocketTransport::new(stream).unwrap();
             let (mut sender, mut receiver) = transport.split();
 
             // Process burst of messages
@@ -847,7 +847,7 @@ async fn test_rapid_message_bursts() -> Result<()> {
 
     // Connect and send burst of messages
     let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
-    let transport = UnixSocketTransport::new(stream);
+    let transport = UnixSocketTransport::new(stream).unwrap();
     let (mut sender, _receiver) = transport.split();
 
     // Send 20 messages in rapid succession, some with FDs, some without
@@ -948,7 +948,7 @@ async fn test_interleaved_requests_responses_notifications() -> Result<()> {
         });
 
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream);
+            let transport = UnixSocketTransport::new(stream).unwrap();
             let (mut sender, mut receiver) = transport.split();
 
             // Process interleaved messages
@@ -964,7 +964,7 @@ async fn test_interleaved_requests_responses_notifications() -> Result<()> {
 
     // Connect and send interleaved messages
     let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
-    let transport = UnixSocketTransport::new(stream);
+    let transport = UnixSocketTransport::new(stream).unwrap();
     let (mut sender, _receiver) = transport.split();
 
     // 1. Request with FD
@@ -1072,7 +1072,7 @@ async fn test_invalid_json_framing_error() -> Result<()> {
 
     let server_handle = tokio::spawn(async move {
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream);
+            let transport = UnixSocketTransport::new(stream).unwrap();
             let (_sender, mut receiver) = transport.split();
 
             // Expect error when receiving invalid JSON
@@ -1126,7 +1126,7 @@ async fn test_mismatched_fd_count_error() -> Result<()> {
         });
 
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream);
+            let transport = UnixSocketTransport::new(stream).unwrap();
             let (mut sender, mut receiver) = transport.split();
 
             // Expect error when processing message with FD count mismatch
@@ -1206,7 +1206,7 @@ async fn test_invalid_placeholder_indices() -> Result<()> {
         });
 
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream);
+            let transport = UnixSocketTransport::new(stream).unwrap();
             let (mut sender, mut receiver) = transport.split();
 
             // Expect error when processing message with invalid placeholder indices
@@ -1228,7 +1228,7 @@ async fn test_invalid_placeholder_indices() -> Result<()> {
 
     // Connect and send message with invalid placeholder indices (non-dense range)
     let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
-    let transport = UnixSocketTransport::new(stream);
+    let transport = UnixSocketTransport::new(stream).unwrap();
     let (mut sender, _receiver) = transport.split();
 
     // Create params with invalid placeholder indices (0, 2, 4 instead of 0, 1, 2)
@@ -1293,7 +1293,7 @@ async fn test_duplicate_placeholder_indices() -> Result<()> {
         });
 
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream);
+            let transport = UnixSocketTransport::new(stream).unwrap();
             let (mut sender, mut receiver) = transport.split();
 
             match receiver.receive().await {
@@ -1314,7 +1314,7 @@ async fn test_duplicate_placeholder_indices() -> Result<()> {
 
     // Connect and send message with duplicate placeholder indices
     let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
-    let transport = UnixSocketTransport::new(stream);
+    let transport = UnixSocketTransport::new(stream).unwrap();
     let (mut sender, _receiver) = transport.split();
 
     // Create params with duplicate placeholder indices
@@ -1380,7 +1380,7 @@ async fn test_no_placeholders_but_fds_provided() -> Result<()> {
         });
 
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream);
+            let transport = UnixSocketTransport::new(stream).unwrap();
             let (mut sender, mut receiver) = transport.split();
 
             match receiver.receive().await {
@@ -1401,7 +1401,7 @@ async fn test_no_placeholders_but_fds_provided() -> Result<()> {
 
     // Connect and send message with FDs but no placeholders
     let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
-    let transport = UnixSocketTransport::new(stream);
+    let transport = UnixSocketTransport::new(stream).unwrap();
     let (mut sender, _receiver) = transport.split();
 
     // Create params with NO file descriptor placeholders
@@ -1446,7 +1446,7 @@ async fn test_connection_drop_with_pending_fds() -> Result<()> {
 
     let server_handle = tokio::spawn(async move {
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream);
+            let transport = UnixSocketTransport::new(stream).unwrap();
             let (_sender, mut receiver) = transport.split();
 
             // Try to receive but client will drop connection
@@ -1466,7 +1466,7 @@ async fn test_connection_drop_with_pending_fds() -> Result<()> {
     // Connect and then immediately drop connection
     {
         let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
-        let transport = UnixSocketTransport::new(stream);
+        let transport = UnixSocketTransport::new(stream).unwrap();
         let (mut sender, _receiver) = transport.split();
 
         let params = serde_json::json!({
@@ -1540,7 +1540,7 @@ async fn test_large_message_with_fds() -> Result<()> {
         });
 
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream);
+            let transport = UnixSocketTransport::new(stream).unwrap();
             let (mut sender, mut receiver) = transport.split();
 
             if let Ok(message_with_fds) = receiver.receive().await {
@@ -1553,7 +1553,7 @@ async fn test_large_message_with_fds() -> Result<()> {
 
     // Connect and send large message with FD
     let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
-    let transport = UnixSocketTransport::new(stream);
+    let transport = UnixSocketTransport::new(stream).unwrap();
     let (mut sender, _receiver) = transport.split();
 
     // Create params with large data and FD placeholder
@@ -1591,7 +1591,7 @@ async fn test_malformed_placeholder_structure() -> Result<()> {
 
     let server_handle = tokio::spawn(async move {
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream);
+            let transport = UnixSocketTransport::new(stream).unwrap();
             let (_sender, mut receiver) = transport.split();
 
             match receiver.receive().await {

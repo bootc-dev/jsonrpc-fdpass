@@ -22,10 +22,10 @@ pub struct UnixSocketTransport {
 }
 
 impl UnixSocketTransport {
-    pub fn new(stream: TokioUnixStream) -> Self {
-        // Convert tokio stream to OwnedFd
-        let fd = stream.into_std().unwrap().into();
-        Self { fd }
+    pub fn new(stream: TokioUnixStream) -> Result<Self> {
+        // Convert tokio stream to OwnedFd. This sets the socket to blocking mode.
+        let fd = stream.into_std().map_err(Error::Io)?.into();
+        Ok(Self { fd })
     }
 
     pub fn split(self) -> (Sender, Receiver) {
