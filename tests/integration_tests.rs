@@ -22,7 +22,6 @@ async fn test_basic_message_serialization() -> Result<()> {
     let serialized = message_with_fds.serialize_with_placeholders()?;
     assert!(serialized.contains("test_method"));
     assert!(serialized.contains("test_param"));
-    assert!(serialized.ends_with('\n'));
 
     Ok(())
 }
@@ -1165,7 +1164,7 @@ async fn test_mismatched_fd_count_error() -> Result<()> {
         "id": 1
     });
 
-    let json_str = serde_json::to_string(&json_with_mismatch).unwrap() + "\n";
+    let json_str = serde_json::to_string(&json_with_mismatch).unwrap();
 
     // Send the JSON with ancillary data containing only 1 FD (but JSON expects 2)
     let _fd: OwnedFd = temp_file.into_file().into();
@@ -1626,7 +1625,7 @@ async fn test_malformed_placeholder_structure() -> Result<()> {
         "id": 1
     });
 
-    let json_str = serde_json::to_string(&malformed_json).unwrap() + "\n";
+    let json_str = serde_json::to_string(&malformed_json).unwrap();
     stream.write_all(json_str.as_bytes()).await.unwrap();
     stream.flush().await.unwrap();
 

@@ -176,7 +176,7 @@ impl MessageWithFds {
         self.insert_placeholders(&mut message_json)?;
 
         let json_str = serde_json::to_string(&message_json)?;
-        Ok(format!("{}\n", json_str))
+        Ok(json_str)
     }
 
     fn insert_placeholders(&self, value: &mut serde_json::Value) -> Result<()> {

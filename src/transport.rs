@@ -111,32 +111,53 @@ impl Receiver {
     }
 
     fn try_parse_message(&mut self) -> Result<Option<MessageWithFds>> {
-        if let Some(newline_pos) = self.buffer.iter().position(|&b| b == b'\n') {
-            let message_bytes = self.buffer.drain(..=newline_pos).collect::<Vec<u8>>();
-            let message_str = std::str::from_utf8(&message_bytes[..message_bytes.len() - 1])
-                .map_err(|_| Error::FramingError)?;
+        if self.buffer.is_empty() {
+            return Ok(None);
+        }
 
-            trace!("Parsing message: {}", message_str);
+        // Use streaming JSON parser to find message boundaries
+        let mut stream =
+            serde_json::Deserializer::from_slice(&self.buffer).into_iter::<serde_json::Value>();
 
-            // Parse JSON once and reuse for both counting and message creation
-            let value: serde_json::Value = serde_json::from_str(message_str)?;
-            let placeholder_count = count_fd_placeholders(&value);
+        match stream.next() {
+            Some(Ok(value)) => {
+                // Successfully parsed a complete JSON value
+                let bytes_consumed = stream.byte_offset();
 
-            if placeholder_count > self.fd_queue.len() {
-                return Err(Error::MismatchedCount {
-                    expected: placeholder_count,
-                    found: self.fd_queue.len(),
-                });
+                trace!("Parsed message ({} bytes): {:?}", bytes_consumed, value);
+
+                // Drain the consumed bytes from the buffer
+                self.buffer.drain(..bytes_consumed);
+
+                // Count placeholders and extract FDs
+                let placeholder_count = count_fd_placeholders(&value);
+
+                if placeholder_count > self.fd_queue.len() {
+                    return Err(Error::MismatchedCount {
+                        expected: placeholder_count,
+                        found: self.fd_queue.len(),
+                    });
+                }
+
+                let fds: Vec<OwnedFd> = (0..placeholder_count)
+                    .map(|_| self.fd_queue.pop_front().unwrap())
+                    .collect();
+
+                let message = JsonRpcMessage::from_json_value(value)?;
+                Ok(Some(MessageWithFds::new(message, fds)))
             }
-
-            let fds: Vec<OwnedFd> = (0..placeholder_count)
-                .map(|_| self.fd_queue.pop_front().unwrap())
-                .collect();
-
-            let message = JsonRpcMessage::from_json_value(value)?;
-            Ok(Some(MessageWithFds::new(message, fds)))
-        } else {
-            Ok(None)
+            Some(Err(e)) if e.is_eof() => {
+                // Incomplete JSON - need more data
+                Ok(None)
+            }
+            Some(Err(e)) => {
+                // Actual parse error
+                Err(Error::Json(e))
+            }
+            None => {
+                // No more values (shouldn't happen with non-empty buffer, but handle it)
+                Ok(None)
+            }
         }
     }
 

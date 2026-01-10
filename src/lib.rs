@@ -8,7 +8,7 @@
 //!
 //! - **JSON-RPC 2.0 compliance**: Full support for requests, responses, and notifications
 //! - **File descriptor passing**: Pass file descriptors using Unix socket ancillary data
-//! - **NDJSON framing**: Newline-delimited JSON for reliable message boundaries
+//! - **Streaming JSON parsing**: Self-delimiting JSON messages without newline requirements
 //! - **Async support**: Built on tokio for high-performance async I/O
 //! - **Type-safe**: Rust's type system ensures correct message handling
 //!
@@ -71,13 +71,15 @@
 //!
 //! ## Protocol Details
 //!
-//! This implementation follows the NDJSON JSON-RPC with File Descriptor Passing specification:
+//! This implementation is a minimal extension to JSON-RPC 2.0 that adds file descriptor
+//! passing over Unix domain sockets:
 //!
 //! - Uses Unix domain sockets (SOCK_STREAM)
-//! - Messages are framed using newline-delimited JSON (NDJSON)
-//! - File descriptors are passed using ancillary data via sendmsg(2)/recvmsg(2)
-//! - Each sendmsg() call contains exactly one complete NDJSON message
-//! - File descriptors are represented in JSON using placeholder objects
+//! - Standard JSON-RPC 2.0 message format with no additional framing requirements
+//! - JSON objects are self-delimiting; no newline or length-prefix framing is required
+//! - File descriptors are passed as ancillary data via sendmsg(2)/recvmsg(2)
+//! - Each sendmsg() call contains exactly one complete JSON-RPC message
+//! - File descriptors are represented in JSON using placeholder objects (see below)
 //!
 //! ### File Descriptor Placeholders
 //!
