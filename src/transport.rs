@@ -6,9 +6,10 @@ use rustix::net::{
     SendAncillaryMessage, SendFlags,
 };
 use std::collections::VecDeque;
-use std::io::{IoSlice, IoSliceMut};
+use std::io::{self, IoSlice, IoSliceMut};
 use std::os::unix::io::OwnedFd;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tokio::io::Interest;
 use tokio::net::UnixStream as TokioUnixStream;
 use tracing::{debug, trace};
 
@@ -18,25 +19,23 @@ const MAX_FDS_PER_MESSAGE: usize = 8;
 const READ_BUFFER_SIZE: usize = 4096;
 
 pub struct UnixSocketTransport {
-    fd: OwnedFd,
+    stream: TokioUnixStream,
 }
 
 impl UnixSocketTransport {
     pub fn new(stream: TokioUnixStream) -> Result<Self> {
-        // Convert tokio stream to OwnedFd. This sets the socket to blocking mode.
-        let fd = stream.into_std().map_err(Error::Io)?.into();
-        Ok(Self { fd })
+        Ok(Self { stream })
     }
 
     pub fn split(self) -> (Sender, Receiver) {
-        let fd = Arc::new(Mutex::new(self.fd));
+        let stream = Arc::new(self.stream);
 
         (
             Sender {
-                fd: Arc::clone(&fd),
+                stream: Arc::clone(&stream),
             },
             Receiver {
-                fd: Arc::clone(&fd),
+                stream,
                 buffer: Vec::new(),
                 fd_queue: VecDeque::new(),
             },
@@ -45,7 +44,7 @@ impl UnixSocketTransport {
 }
 
 pub struct Sender {
-    fd: Arc<Mutex<OwnedFd>>,
+    stream: Arc<TokioUnixStream>,
 }
 
 impl Sender {
@@ -59,43 +58,43 @@ impl Sender {
             message_with_fds.file_descriptors.len()
         );
 
-        let fd = Arc::clone(&self.fd);
         let fds = message_with_fds.file_descriptors;
 
-        tokio::task::spawn_blocking(move || {
-            let sockfd = fd.lock().unwrap();
+        self.stream
+            .async_io(Interest::WRITABLE, || {
+                let sockfd = self.stream.as_fd();
 
-            if fds.is_empty() {
-                // No file descriptors to send - use regular send
-                rustix::net::send(&*sockfd, &data, SendFlags::empty())
-                    .map_err(|e| Error::SystemCall(format!("send failed: {}", e)))?;
-            } else {
-                // Convert OwnedFd to BorrowedFd for sending
-                let borrowed_fds: Vec<_> = fds.iter().map(|fd| fd.as_fd()).collect();
+                if fds.is_empty() {
+                    // No file descriptors to send - use regular send
+                    rustix::net::send(sockfd, &data, SendFlags::empty())
+                        .map_err(|e| to_io_error(e, "send"))?;
+                } else {
+                    // Convert OwnedFd to BorrowedFd for sending
+                    let borrowed_fds: Vec<_> = fds.iter().map(|fd| fd.as_fd()).collect();
 
-                let mut buffer: Vec<u8> =
-                    vec![0u8; rustix::cmsg_space!(ScmRights(MAX_FDS_PER_MESSAGE))];
-                let mut control = SendAncillaryBuffer::new(buffer.as_mut_slice());
+                    let mut buffer: Vec<u8> =
+                        vec![0u8; rustix::cmsg_space!(ScmRights(MAX_FDS_PER_MESSAGE))];
+                    let mut control = SendAncillaryBuffer::new(buffer.as_mut_slice());
 
-                if !control.push(SendAncillaryMessage::ScmRights(&borrowed_fds)) {
-                    return Err(Error::SystemCall(
-                        "Failed to add file descriptors to control message".to_string(),
-                    ));
+                    if !control.push(SendAncillaryMessage::ScmRights(&borrowed_fds)) {
+                        return Err(io::Error::other(
+                            "Failed to add file descriptors to control message",
+                        ));
+                    }
+
+                    let iov = [IoSlice::new(&data)];
+                    rustix::net::sendmsg(sockfd, &iov, &mut control, SendFlags::empty())
+                        .map_err(|e| to_io_error(e, "sendmsg"))?;
                 }
-
-                let iov = [IoSlice::new(&data)];
-                rustix::net::sendmsg(&*sockfd, &iov, &mut control, SendFlags::empty())
-                    .map_err(|e| Error::SystemCall(format!("sendmsg failed: {}", e)))?;
-            }
-            Ok(())
-        })
-        .await
-        .map_err(|e| Error::SystemCall(format!("Task join error: {}", e)))?
+                Ok(())
+            })
+            .await
+            .map_err(Error::Io)
     }
 }
 
 pub struct Receiver {
-    fd: Arc<Mutex<OwnedFd>>,
+    stream: Arc<TokioUnixStream>,
     buffer: Vec<u8>,
     fd_queue: VecDeque<OwnedFd>,
 }
@@ -142,45 +141,45 @@ impl Receiver {
     }
 
     async fn read_more_data(&mut self) -> Result<()> {
-        let fd = Arc::clone(&self.fd);
+        let mut data_buffer = [0u8; READ_BUFFER_SIZE];
+        let mut received_fds: Vec<OwnedFd> = Vec::new();
 
-        let (bytes_read, data, fds) = tokio::task::spawn_blocking(move || {
-            let sockfd = fd.lock().unwrap();
-            let mut data_buffer = [0u8; READ_BUFFER_SIZE];
-            let mut iov = [IoSliceMut::new(&mut data_buffer)];
-            let mut cmsg_space: Vec<u8> =
-                vec![0u8; rustix::cmsg_space!(ScmRights(MAX_FDS_PER_MESSAGE))];
-            let mut cmsg_buffer = RecvAncillaryBuffer::new(cmsg_space.as_mut_slice());
+        let bytes_read = self
+            .stream
+            .async_io(Interest::READABLE, || {
+                let sockfd = self.stream.as_fd();
 
-            let result = rustix::net::recvmsg(
-                &*sockfd,
-                &mut iov,
-                &mut cmsg_buffer,
-                RecvFlags::CMSG_CLOEXEC,
-            )
-            .map_err(|e| Error::SystemCall(format!("recvmsg failed: {}", e)))?;
+                let mut iov = [IoSliceMut::new(&mut data_buffer)];
+                let mut cmsg_space: Vec<u8> =
+                    vec![0u8; rustix::cmsg_space!(ScmRights(MAX_FDS_PER_MESSAGE))];
+                let mut cmsg_buffer = RecvAncillaryBuffer::new(cmsg_space.as_mut_slice());
 
-            let bytes_read = result.bytes;
-            let mut fds = Vec::new();
+                let result = rustix::net::recvmsg(
+                    sockfd,
+                    &mut iov,
+                    &mut cmsg_buffer,
+                    RecvFlags::CMSG_CLOEXEC,
+                )
+                .map_err(|e| to_io_error(e, "recvmsg"))?;
 
-            // Extract file descriptors from control messages
-            for msg in cmsg_buffer.drain() {
-                if let RecvAncillaryMessage::ScmRights(received_fds) = msg {
-                    fds.extend(received_fds);
+                // Extract file descriptors from control messages
+                for msg in cmsg_buffer.drain() {
+                    if let RecvAncillaryMessage::ScmRights(fds) = msg {
+                        received_fds.extend(fds);
+                    }
                 }
-            }
 
-            Ok::<_, Error>((bytes_read, data_buffer, fds))
-        })
-        .await
-        .map_err(|e| Error::SystemCall(format!("Task join error: {}", e)))??;
+                Ok(result.bytes)
+            })
+            .await
+            .map_err(Error::Io)?;
 
         if bytes_read == 0 {
             return Err(Error::ConnectionClosed);
         }
 
-        self.buffer.extend_from_slice(&data[..bytes_read]);
-        self.fd_queue.extend(fds);
+        self.buffer.extend_from_slice(&data_buffer[..bytes_read]);
+        self.fd_queue.extend(received_fds);
 
         debug!(
             "Read {} bytes, {} FDs in queue",
@@ -188,5 +187,16 @@ impl Receiver {
             self.fd_queue.len()
         );
         Ok(())
+    }
+}
+
+/// Convert a rustix error to an io::Error, preserving EAGAIN/EWOULDBLOCK for async_io
+fn to_io_error(e: rustix::io::Errno, operation: &str) -> io::Error {
+    // rustix::io::Errno can be converted to io::Error, which preserves the error kind
+    let io_err: io::Error = e.into();
+    if io_err.kind() == io::ErrorKind::WouldBlock {
+        io_err
+    } else {
+        io::Error::new(io_err.kind(), format!("{} failed: {}", operation, io_err))
     }
 }
