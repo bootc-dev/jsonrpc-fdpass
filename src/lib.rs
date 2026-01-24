@@ -57,10 +57,7 @@
 //!     let fd: OwnedFd = file.into();
 //!     
 //!     let params = json!({
-//!         "file": {
-//!             "__jsonrpc_fd__": true,
-//!             "index": 0
-//!         }
+//!         "filename": "example.txt"
 //!     });
 //!     
 //!     client.call_method("read_file", Some(params), vec![fd]).await?;
@@ -79,20 +76,24 @@
 //! - JSON objects are self-delimiting; no newline or length-prefix framing is required
 //! - File descriptors are passed as ancillary data via sendmsg(2)/recvmsg(2)
 //! - Each sendmsg() call contains exactly one complete JSON-RPC message
-//! - File descriptors are represented in JSON using placeholder objects (see below)
 //!
-//! ### File Descriptor Placeholders
+//! ### File Descriptor Count Field
 //!
-//! File descriptors are represented in JSON messages using special placeholder objects:
+//! When file descriptors are attached to a message, the `fds` field at the top level
+//! of the JSON object specifies how many FDs are attached:
 //!
 //! ```json
 //! {
-//!   "__jsonrpc_fd__": true,
-//!   "index": 0
+//!   "jsonrpc": "2.0",
+//!   "method": "read_file",
+//!   "params": {"filename": "example.txt"},
+//!   "id": 1,
+//!   "fds": 1
 //! }
 //! ```
 //!
-//! The `index` field corresponds to the position of the file descriptor in the ancillary data.
+//! File descriptors are passed positionally—the application layer defines the semantic
+//! mapping between FD positions and parameters.
 
 #![forbid(unsafe_code)]
 
@@ -106,8 +107,8 @@ pub use client::Client;
 pub use error::{Error, Result};
 pub use jsonrpsee::types::error::ErrorObject as JsonRpcError;
 pub use message::{
-    file_descriptor_error, FileDescriptorPlaceholder, JsonRpcMessage, JsonRpcNotification,
-    JsonRpcRequest, JsonRpcResponse, MessageWithFds, FILE_DESCRIPTOR_ERROR_CODE,
+    file_descriptor_error, JsonRpcMessage, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse,
+    MessageWithFds, FILE_DESCRIPTOR_ERROR_CODE,
 };
 pub use server::Server;
 pub use transport::{Receiver, Sender, UnixSocketTransport};

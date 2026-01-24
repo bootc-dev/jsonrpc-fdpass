@@ -40,23 +40,23 @@ To ensure file descriptors are correctly associated with their corresponding mes
 
 The protocol is a strict extension of JSON-RPC 2.0. All standard rules regarding the structure of Request, Response, and Notification objects apply.
 
-### 3.2. File Descriptor Placeholder
+### 3.2. File Descriptor Count Field
 
-To represent a file descriptor within a JSON message, a **File Descriptor Placeholder** object MUST be used.
-
-The placeholder object has the following structure:
+When a JSON-RPC message is accompanied by file descriptors, the message MUST include an `fds` field at the top level of the JSON object. This field indicates how many file descriptors are attached to the message.
 
 ```json
 {
-  "__jsonrpc_fd__": true,
-  "index": <integer>
+  "jsonrpc": "2.0",
+  "method": "writeFile",
+  "params": { "data": "..." },
+  "id": 1,
+  "fds": 1
 }
 ```
 
-* `__jsonrpc_fd__` (boolean): A marker field that MUST be present and set to true.
-* `index` (integer): A non-negative, zero-based integer.
+* `fds` (integer): A non-negative integer specifying the number of file descriptors attached to this message.
 
-When N file descriptors are passed with a message (N > 0), the JSON payload MUST contain exactly N placeholder objects. The index values in these placeholders MUST be unique and MUST form a complete, dense range from 0 to N-1.
+When N file descriptors are passed with a message (N > 0), the `fds` field MUST be present and set to N. The file descriptors are passed positionally—the application layer defines the semantic mapping between FD positions and parameters. If `fds` is 0 or absent, no file descriptors are associated with the message.
 
 ## 4. File Descriptor Passing Mechanism
 
@@ -78,9 +78,9 @@ Because SOCK_STREAM does not preserve message boundaries, the receiver MUST impl
 3. **Processing Loop:** The receiver MUST process the byte buffer by repeatedly performing the following steps until no more complete messages can be extracted:
    1. **Streaming Parse:** Attempt to parse a complete JSON object from the beginning of the byte buffer using a streaming JSON parser. If the buffer contains an incomplete JSON value (e.g., the parser encounters EOF mid-value), the processing loop terminates until more data is received.
    2. **Handle Parse Result:** If parsing succeeds, record the number of bytes consumed. If parsing fails with a syntax error (not EOF), this is a fatal Framing Error (see Section 7), and the connection MUST be closed.
-   3. **Count Placeholders:** Count the number of File Descriptor Placeholders (N) within the parsed JSON message.
+   3. **Read FD Count:** Read the `fds` field from the parsed JSON message to determine the number of file descriptors (N) associated with this message. If the field is absent, N is 0.
    4. **Check FD Queue:** Check if the file descriptor queue contains at least N FDs. If it contains fewer than N FDs, this is a fatal Mismatched Count error (see Section 7). The protocol state is desynchronized, and the connection MUST be closed.
-   5. **Dequeue and Associate:** Dequeue the first N file descriptors from the front of the queue. These FDs correspond, in order, to the placeholders with indices 0 through N-1. The receiver MUST substitute the placeholder objects in its internal representation of the message with these actual file descriptor values.
+   5. **Dequeue and Associate:** Dequeue the first N file descriptors from the front of the queue. These FDs correspond positionally (0 through N-1) to the file descriptors expected by the application for this message.
    6. **Dispatch:** The fully-formed message (with FDs) is now ready and SHOULD be dispatched to the application logic for handling.
    7. **Consume Bytes:** The consumed bytes MUST be removed from the front of the byte buffer.
 
@@ -97,7 +97,7 @@ A client asks a server to write to a file.
 1. Open a file, yielding fd = 5.
 2. Construct the JSON payload:
    ```json
-   {"jsonrpc":"2.0","method":"writeFile","params":{"file":{"__jsonrpc_fd__":true,"index":0},"data":"..."},"id":1}
+   {"jsonrpc":"2.0","method":"writeFile","params":{"data":"..."},"id":1,"fds":1}
    ```
 3. Call sendmsg() with the JSON payload and one control message containing the file descriptor 5.
 
@@ -106,7 +106,7 @@ A client asks a server to write to a file.
 1. Call recvmsg(), receiving a data chunk and the file descriptor 5.
 2. Append the data to its byte buffer. Enqueue 5 into its FD queue.
 3. Begin the processing loop. The streaming parser finds a complete JSON object.
-4. It parses the JSON message. It counts N=1 placeholder.
+4. It parses the JSON message. It reads `fds: 1`, so N=1.
 5. It checks that the FD queue size is >= 1. It is.
 6. It dequeues the FD 5 and associates it with the message.
 7. The complete message is dispatched. The processed bytes are removed from the buffer.
@@ -124,9 +124,7 @@ The primary error code for these issues is:
 **Conditions that MUST be treated as fatal errors:**
 
 * **Framing Error:** The byte stream cannot be parsed as valid JSON (syntax error, not incomplete data).
-* **Mismatched Count:** A parsed message requires N file descriptors, but the receiver's file descriptor queue contains fewer than N available FDs at the time of processing.
-* **Invalid Placeholders:** The index values in a message's placeholders are not unique or do not form a dense range 0..N-1.
-* **Dangling File Descriptors:** A message contains zero placeholders, but file descriptors were received with it. This is implicitly handled by the receiver logic, but a sender that does this is non-compliant.
+* **Mismatched Count:** A parsed message's `fds` field specifies N file descriptors, but the receiver's file descriptor queue contains fewer than N available FDs at the time of processing.
 
 ## 8. Security Considerations
 

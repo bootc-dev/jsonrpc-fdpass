@@ -297,7 +297,7 @@ async fn test_our_format_is_valid_jsonrpc() -> Result<()> {
         Value::Number(1.into()),
     );
     let msg = MessageWithFds::new(JsonRpcMessage::Request(request), vec![]);
-    let serialized = msg.serialize_with_placeholders()?;
+    let serialized = msg.serialize()?;
 
     // Parse and validate structure
     let parsed: serde_json::Value = serde_json::from_str(&serialized).unwrap();
@@ -316,7 +316,7 @@ async fn test_our_format_is_valid_jsonrpc() -> Result<()> {
     let notification =
         JsonRpcNotification::new("notify".to_string(), Some(serde_json::json!({"event": 1})));
     let msg = MessageWithFds::new(JsonRpcMessage::Notification(notification), vec![]);
-    let serialized = msg.serialize_with_placeholders()?;
+    let serialized = msg.serialize()?;
 
     let parsed: serde_json::Value = serde_json::from_str(&serialized).unwrap();
     assert_eq!(

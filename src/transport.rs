@@ -1,5 +1,5 @@
 use crate::error::{Error, Result};
-use crate::message::{count_fd_placeholders, JsonRpcMessage, MessageWithFds};
+use crate::message::{get_fd_count, JsonRpcMessage, MessageWithFds};
 use rustix::fd::AsFd;
 use rustix::net::{
     RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags, SendAncillaryBuffer,
@@ -61,9 +61,9 @@ impl Sender {
 
     pub async fn send(&mut self, message_with_fds: MessageWithFds) -> Result<()> {
         let serialized = if self.pretty {
-            message_with_fds.serialize_with_placeholders_pretty()?
+            message_with_fds.serialize_pretty()?
         } else {
-            message_with_fds.serialize_with_placeholders()?
+            message_with_fds.serialize()?
         };
         let data = serialized.into_bytes();
 
@@ -174,17 +174,17 @@ impl Receiver {
                 // Drain the consumed bytes from the buffer
                 self.buffer.drain(..bytes_consumed);
 
-                // Count placeholders and extract FDs
-                let placeholder_count = count_fd_placeholders(&value);
+                // Read the fds count from the message and extract FDs
+                let fd_count = get_fd_count(&value);
 
-                if placeholder_count > self.fd_queue.len() {
+                if fd_count > self.fd_queue.len() {
                     return Err(Error::MismatchedCount {
-                        expected: placeholder_count,
+                        expected: fd_count,
                         found: self.fd_queue.len(),
                     });
                 }
 
-                let fds: Vec<OwnedFd> = (0..placeholder_count)
+                let fds: Vec<OwnedFd> = (0..fd_count)
                     .map(|_| self.fd_queue.pop_front().unwrap())
                     .collect();
 

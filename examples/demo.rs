@@ -92,12 +92,8 @@ async fn run_client(socket_path: PathBuf) -> Result<()> {
 
     let fd: OwnedFd = temp_file.into_file().into();
 
-    // Call method with file descriptor
     let params = serde_json::json!({
-        "file": {
-            "__jsonrpc_fd__": true,
-            "index": 0
-        }
+        "description": "Read the attached file"
     });
 
     info!("Client sending file descriptor to server");

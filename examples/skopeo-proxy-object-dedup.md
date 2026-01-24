@@ -188,7 +188,7 @@ Client queries server to determine which objects are missing and need transfer.
 
 Transfers missing objects in batches via file descriptors for maximum efficiency.
 
-**Request:**
+**Request (with 2 FDs: data stream + progress pipe):**
 ```json
 {
   "jsonrpc": "2.0",
@@ -209,17 +209,10 @@ Transfers missing objects in batches via file descriptors for maximum efficiency
         "size": 16384,
         "compressionFormat": "lz4"
       }
-    ],
-    "dataStream": {
-      "__jsonrpc_fd__": true,
-      "index": 0
-    },
-    "progressPipe": {
-      "__jsonrpc_fd__": true,
-      "index": 1
-    }
+    ]
   },
-  "id": 3
+  "id": 3,
+  "fds": 2
 }
 ```
 
@@ -253,7 +246,7 @@ Transfers missing objects in batches via file descriptors for maximum efficiency
 
 Transfers the split-stream metadata that describes how to reconstruct the layer.
 
-**Request:**
+**Request (with 1 FD: data stream):**
 ```json
 {
   "jsonrpc": "2.0",
@@ -266,13 +259,10 @@ Transfers the split-stream metadata that describes how to reconstruct the layer.
       "compressionFormat": "zstd",
       "layerDigest": "sha256:layer123...",
       "objectCount": 247
-    },
-    "dataStream": {
-      "__jsonrpc_fd__": true,
-      "index": 0
     }
   },
-  "id": 4
+  "id": 4,
+  "fds": 1
 }
 ```
 
@@ -314,7 +304,7 @@ Reconstructs the complete layer from split-stream + stored objects.
 }
 ```
 
-**Response:**
+**Response (with 1 FD: layer pipe):**
 ```json
 {
   "jsonrpc": "2.0",
@@ -330,13 +320,10 @@ Reconstructs the complete layer from split-stream + stored objects.
       "objectsReused": 156,
       "reconstructionTime": 0.234,
       "compressionRatio": 0.42
-    },
-    "layerPipe": {
-      "__jsonrpc_fd__": true,
-      "index": 0
     }
   },
-  "id": 5
+  "id": 5,
+  "fds": 1
 }
 ```
 
@@ -399,18 +386,18 @@ The deduplication workflow demonstrates the efficiency gains possible with objec
 → {"jsonrpc": "2.0", "method": "QueryObjectAvailability", "params": {"destinationID": 67890, "objectDigests": ["sha256:obj001...", ...]}, "id": 2}
 ← {"jsonrpc": "2.0", "result": {"missingObjects": [{"fsverityDigest": "sha256:obj002..."}], "cacheHitRatio": 0.75}, "id": 2}
 
-# 3. Transfer only missing objects (25% of total)
-→ {"jsonrpc": "2.0", "method": "PutObjectBatch", "params": {"objects": [...], "dataStream": {"__jsonrpc_fd__": true, "index": 0}}, "id": 3}
+# 3. Transfer only missing objects (25% of total, with 1 FD for data stream)
+→ {"jsonrpc": "2.0", "method": "PutObjectBatch", "params": {"objects": [...]}, "id": 3, "fds": 1}
    [FD 0 contains packed binary stream of missing objects]
 ← {"jsonrpc": "2.0", "result": {"storedObjects": [...], "totalStored": 62}, "id": 3}
 
-# 4. Transfer split-stream metadata
-→ {"jsonrpc": "2.0", "method": "PutSplitStream", "params": {"splitStream": {"digest": "sha256:splitstream456..."}, "dataStream": {"__jsonrpc_fd__": true, "index": 0}}, "id": 4}
+# 4. Transfer split-stream metadata (with 1 FD for data stream)
+→ {"jsonrpc": "2.0", "method": "PutSplitStream", "params": {"splitStream": {"digest": "sha256:splitstream456..."}}, "id": 4, "fds": 1}
 ← {"jsonrpc": "2.0", "result": {"readyForReconstruction": true}, "id": 4}
 
-# 5. Reconstruct complete layer from objects + split-stream  
+# 5. Reconstruct complete layer from objects + split-stream (response has 1 FD)
 → {"jsonrpc": "2.0", "method": "ReconstructLayer", "params": {"layerDigest": "sha256:layer123...", "splitStreamDigest": "sha256:splitstream456..."}, "id": 5}
-← {"jsonrpc": "2.0", "result": {"reconstructedLayer": {"size": 45678912}, "layerPipe": {"__jsonrpc_fd__": true, "index": 0}}, "id": 5}
+← {"jsonrpc": "2.0", "result": {"reconstructedLayer": {"size": 45678912}}, "id": 5, "fds": 1}
    [FD 0 contains the complete reconstructed layer tar stream]
 ```
 

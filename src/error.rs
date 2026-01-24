@@ -11,16 +11,10 @@ pub enum Error {
     #[error("Protocol framing error: invalid JSON in message")]
     FramingError,
 
-    #[error("File descriptor count mismatch: expected {expected}, found {found}")]
-    MismatchedCount { expected: usize, found: usize },
-
     #[error(
-        "Invalid file descriptor placeholders: indices must be unique and form dense range 0..N-1"
+        "File descriptor count mismatch: fds field specifies {expected}, but {found} FDs available"
     )]
-    InvalidPlaceholders,
-
-    #[error("Dangling file descriptors: message has no placeholders but FDs were received")]
-    DanglingFileDescriptors,
+    MismatchedCount { expected: usize, found: usize },
 
     #[error("System call error: {0}")]
     SystemCall(String),

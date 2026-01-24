@@ -49,19 +49,18 @@ The migration addresses these limitations through three key architectural change
      "id": 1
    }
    
-   // New Reply Format (always two pipes: data + error)
+   // New Reply Format (always two pipes: data + error, indicated by fds field)
    {
      "jsonrpc": "2.0",
      "result": {
-       "size": 1024,
-       "dataPipe": {"__jsonrpc_fd__": true, "index": 0},
-       "errorPipe": {"__jsonrpc_fd__": true, "index": 1}
+       "size": 1024
      },
-     "id": 1
+     "id": 1,
+     "fds": 2
    }
    ```
 
-**Resource Management:** The new protocol eliminates pipe lifecycle complexity by using placeholder objects that reference file descriptors by index. Each blob request returns both data and error streams, allowing clients to handle both success and failure cases through the same interface.
+**Resource Management:** The new protocol eliminates pipe lifecycle complexity by using the `fds` field to indicate the number of file descriptors attached. FDs are passed positionally: index 0 is the data pipe, index 1 is the error pipe. Each blob request returns both data and error streams, allowing clients to handle both success and failure cases through the same interface.
 
 ## Implementation Approach
 
@@ -179,21 +178,14 @@ This migration delivers measurable improvements in four key areas:
   "id": 4
 }
 
-// Response (with 2 FDs as placeholders)  
+// Response (with 2 FDs passed positionally: data=0, error=1)  
 {
   "jsonrpc": "2.0",
   "result": {
-    "size": 2048,
-    "dataPipe": {
-      "__jsonrpc_fd__": true,
-      "index": 0
-    },
-    "errorPipe": {
-      "__jsonrpc_fd__": true, 
-      "index": 1
-    }
+    "size": 2048
   },
-  "id": 3
+  "id": 3,
+  "fds": 2
 }
 ```
 

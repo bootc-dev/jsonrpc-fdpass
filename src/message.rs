@@ -3,55 +3,24 @@ use jsonrpsee::types::error::ErrorObject as JsonRpcError;
 use serde::{Deserialize, Serialize};
 use std::os::unix::io::OwnedFd;
 
-/// The JSON key used to identify file descriptor placeholders.
-pub const FD_PLACEHOLDER_KEY: &str = "__jsonrpc_fd__";
-/// The JSON key for the file descriptor index within a placeholder.
-pub const FD_INDEX_KEY: &str = "index";
+/// The JSON key for the file descriptor count field.
+pub const FDS_KEY: &str = "fds";
 /// The JSON-RPC protocol version.
 pub const JSONRPC_VERSION: &str = "2.0";
 
-/// Count file descriptor placeholders in a JSON value.
-pub fn count_fd_placeholders(value: &serde_json::Value) -> usize {
-    fn count_inner(value: &serde_json::Value, count: &mut usize) {
-        match value {
-            serde_json::Value::Object(map) => {
-                if let (Some(serde_json::Value::Bool(true)), Some(_)) =
-                    (map.get(FD_PLACEHOLDER_KEY), map.get(FD_INDEX_KEY))
-                {
-                    *count += 1;
-                } else {
-                    for v in map.values() {
-                        count_inner(v, count);
-                    }
-                }
-            }
-            serde_json::Value::Array(arr) => {
-                for v in arr {
-                    count_inner(v, count);
-                }
-            }
-            _ => {}
-        }
-    }
-    let mut count = 0;
-    count_inner(value, &mut count);
-    count
+/// Read the file descriptor count from a JSON message.
+/// Returns 0 if the `fds` field is absent.
+pub fn get_fd_count(value: &serde_json::Value) -> usize {
+    value
+        .get(FDS_KEY)
+        .and_then(|v| v.as_u64())
+        .map(|n| n as usize)
+        .unwrap_or(0)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileDescriptorPlaceholder {
-    #[serde(rename = "__jsonrpc_fd__")]
-    pub marker: bool,
-    pub index: usize,
-}
-
-impl FileDescriptorPlaceholder {
-    pub fn new(index: usize) -> Self {
-        Self {
-            marker: true,
-            index,
-        }
-    }
+/// Helper to skip serializing fds field when it's None or 0
+fn skip_if_zero_or_none(fds: &Option<usize>) -> bool {
+    fds.map_or(true, |n| n == 0)
 }
 
 // Define our own message types that don't have lifetime constraints
@@ -59,8 +28,12 @@ impl FileDescriptorPlaceholder {
 pub struct JsonRpcRequest {
     pub jsonrpc: String,
     pub method: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub params: Option<serde_json::Value>,
     pub id: serde_json::Value,
+    /// Number of file descriptors attached to this message
+    #[serde(skip_serializing_if = "skip_if_zero_or_none")]
+    pub fds: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,13 +44,20 @@ pub struct JsonRpcResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<JsonRpcError<'static>>,
     pub id: serde_json::Value,
+    /// Number of file descriptors attached to this message
+    #[serde(skip_serializing_if = "skip_if_zero_or_none")]
+    pub fds: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JsonRpcNotification {
     pub jsonrpc: String,
     pub method: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub params: Option<serde_json::Value>,
+    /// Number of file descriptors attached to this message
+    #[serde(skip_serializing_if = "skip_if_zero_or_none")]
+    pub fds: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -94,6 +74,7 @@ impl JsonRpcRequest {
             method,
             params,
             id,
+            fds: None,
         }
     }
 }
@@ -105,6 +86,7 @@ impl JsonRpcResponse {
             result: Some(result),
             error: None,
             id,
+            fds: None,
         }
     }
 
@@ -114,6 +96,7 @@ impl JsonRpcResponse {
             result: None,
             error: Some(error),
             id,
+            fds: None,
         }
     }
 }
@@ -124,6 +107,7 @@ impl JsonRpcNotification {
             jsonrpc: JSONRPC_VERSION.to_string(),
             method,
             params,
+            fds: None,
         }
     }
 }
@@ -163,6 +147,27 @@ pub struct MessageWithFds {
     pub file_descriptors: Vec<OwnedFd>,
 }
 
+impl JsonRpcMessage {
+    /// Set the fds count on the message
+    pub fn set_fds(&mut self, count: usize) {
+        let fds = if count > 0 { Some(count) } else { None };
+        match self {
+            JsonRpcMessage::Request(req) => req.fds = fds,
+            JsonRpcMessage::Response(res) => res.fds = fds,
+            JsonRpcMessage::Notification(notif) => notif.fds = fds,
+        }
+    }
+
+    /// Get the fds count from the message
+    pub fn get_fds(&self) -> usize {
+        match self {
+            JsonRpcMessage::Request(req) => req.fds.unwrap_or(0),
+            JsonRpcMessage::Response(res) => res.fds.unwrap_or(0),
+            JsonRpcMessage::Notification(notif) => notif.fds.unwrap_or(0),
+        }
+    }
+}
+
 impl MessageWithFds {
     pub fn new(message: JsonRpcMessage, file_descriptors: Vec<OwnedFd>) -> Self {
         Self {
@@ -171,18 +176,22 @@ impl MessageWithFds {
         }
     }
 
-    pub fn serialize_with_placeholders(&self) -> Result<String> {
-        self.serialize_with_placeholders_impl(false)
+    /// Serialize the message, setting the `fds` field to match the number of attached FDs.
+    pub fn serialize(&self) -> Result<String> {
+        self.serialize_impl(false)
     }
 
-    pub fn serialize_with_placeholders_pretty(&self) -> Result<String> {
-        self.serialize_with_placeholders_impl(true)
+    /// Serialize the message with pretty-printing.
+    pub fn serialize_pretty(&self) -> Result<String> {
+        self.serialize_impl(true)
     }
 
-    fn serialize_with_placeholders_impl(&self, pretty: bool) -> Result<String> {
-        let mut message_json = self.message.to_json_value()?;
-        self.insert_placeholders(&mut message_json)?;
+    fn serialize_impl(&self, pretty: bool) -> Result<String> {
+        // Clone the message so we can set the fds field
+        let mut message = self.message.clone();
+        message.set_fds(self.file_descriptors.len());
 
+        let message_json = message.to_json_value()?;
         let json_str = if pretty {
             serde_json::to_string_pretty(&message_json)?
         } else {
@@ -191,117 +200,21 @@ impl MessageWithFds {
         Ok(json_str)
     }
 
-    fn insert_placeholders(&self, value: &mut serde_json::Value) -> Result<()> {
-        let fd_count = self.file_descriptors.len();
-        let mut placeholder_indices = Vec::new();
-
-        Self::collect_placeholder_indices(value, &mut placeholder_indices);
-
-        if placeholder_indices.len() != fd_count {
-            return Err(Error::MismatchedCount {
-                expected: fd_count,
-                found: placeholder_indices.len(),
-            });
-        }
-
-        placeholder_indices.sort_unstable();
-        let expected: Vec<usize> = (0..fd_count).collect();
-        if placeholder_indices != expected {
-            return Err(Error::InvalidPlaceholders);
-        }
-
-        Ok(())
-    }
-
-    fn collect_placeholder_indices(value: &serde_json::Value, indices: &mut Vec<usize>) {
-        match value {
-            serde_json::Value::Object(map) => {
-                if let (
-                    Some(serde_json::Value::Bool(true)),
-                    Some(serde_json::Value::Number(index)),
-                ) = (map.get(FD_PLACEHOLDER_KEY), map.get(FD_INDEX_KEY))
-                {
-                    if let Some(index) = index.as_u64() {
-                        indices.push(index as usize);
-                    }
-                } else {
-                    for v in map.values() {
-                        Self::collect_placeholder_indices(v, indices);
-                    }
-                }
-            }
-            serde_json::Value::Array(arr) => {
-                for v in arr {
-                    Self::collect_placeholder_indices(v, indices);
-                }
-            }
-            _ => {}
-        }
-    }
-
+    /// Create a MessageWithFds from parsed JSON and file descriptors.
+    /// The `fds` field in the JSON must match the number of provided FDs.
     pub fn from_json_with_fds(json_str: &str, fds: Vec<OwnedFd>) -> Result<Self> {
         let message_json: serde_json::Value = serde_json::from_str(json_str)?;
+        let expected_count = get_fd_count(&message_json);
 
-        let placeholder_count = count_fd_placeholders(&message_json);
-
-        if placeholder_count != fds.len() {
+        if expected_count != fds.len() {
             return Err(Error::MismatchedCount {
-                expected: placeholder_count,
+                expected: expected_count,
                 found: fds.len(),
             });
         }
 
-        if placeholder_count > 0 {
-            Self::validate_placeholder_indices(&message_json, placeholder_count)?;
-        } else if !fds.is_empty() {
-            return Err(Error::DanglingFileDescriptors);
-        }
-
         let message = JsonRpcMessage::from_json_value(message_json)?;
         Ok(Self::new(message, fds))
-    }
-
-    fn validate_placeholder_indices(
-        value: &serde_json::Value,
-        expected_count: usize,
-    ) -> Result<()> {
-        let mut indices = Vec::new();
-        Self::collect_indices(value, &mut indices);
-
-        indices.sort_unstable();
-        let expected: Vec<usize> = (0..expected_count).collect();
-
-        if indices != expected {
-            return Err(Error::InvalidPlaceholders);
-        }
-
-        Ok(())
-    }
-
-    fn collect_indices(value: &serde_json::Value, indices: &mut Vec<usize>) {
-        match value {
-            serde_json::Value::Object(map) => {
-                if let (
-                    Some(serde_json::Value::Bool(true)),
-                    Some(serde_json::Value::Number(index)),
-                ) = (map.get(FD_PLACEHOLDER_KEY), map.get(FD_INDEX_KEY))
-                {
-                    if let Some(index) = index.as_u64() {
-                        indices.push(index as usize);
-                    }
-                } else {
-                    for v in map.values() {
-                        Self::collect_indices(v, indices);
-                    }
-                }
-            }
-            serde_json::Value::Array(arr) => {
-                for v in arr {
-                    Self::collect_indices(v, indices);
-                }
-            }
-            _ => {}
-        }
     }
 }
 

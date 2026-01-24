@@ -19,7 +19,7 @@ async fn test_basic_message_serialization() -> Result<()> {
     let message = JsonRpcMessage::Request(request);
     let message_with_fds = MessageWithFds::new(message, vec![]);
 
-    let serialized = message_with_fds.serialize_with_placeholders()?;
+    let serialized = message_with_fds.serialize()?;
     assert!(serialized.contains("test_method"));
     assert!(serialized.contains("test_param"));
 
@@ -27,13 +27,10 @@ async fn test_basic_message_serialization() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_file_descriptor_placeholder() -> Result<()> {
-    // Create a message with file descriptor placeholder
+async fn test_fds_field_in_serialization() -> Result<()> {
+    // Test that the fds field is correctly set during serialization
     let params = serde_json::json!({
-        "file": {
-            "__jsonrpc_fd__": true,
-            "index": 0
-        }
+        "filename": "test.txt"
     });
 
     let request = JsonRpcRequest::new(
@@ -52,9 +49,9 @@ async fn test_file_descriptor_placeholder() -> Result<()> {
     let fd: OwnedFd = temp_file.into_file().into();
     let message_with_fds = MessageWithFds::new(message, vec![fd]);
 
-    let serialized = message_with_fds.serialize_with_placeholders()?;
-    assert!(serialized.contains("__jsonrpc_fd__"));
-    assert!(serialized.contains("\"index\":0"));
+    let serialized = message_with_fds.serialize()?;
+    // Should contain fds: 1 since we have one FD
+    assert!(serialized.contains("\"fds\":1"));
 
     Ok(())
 }
@@ -169,12 +166,8 @@ async fn test_file_descriptor_passing() -> Result<()> {
     let transport = UnixSocketTransport::new(stream).unwrap();
     let (mut sender, _receiver) = transport.split();
 
-    // Create params with file descriptor placeholder
     let params = serde_json::json!({
-        "file": {
-            "__jsonrpc_fd__": true,
-            "index": 0
-        }
+        "operation": "read"
     });
 
     // Send a test message with file descriptor
@@ -276,10 +269,6 @@ async fn test_multiple_messages_with_fds_sequential() -> Result<()> {
         let fd: OwnedFd = temp_file.into_file().into();
 
         let params = serde_json::json!({
-            "file": {
-                "__jsonrpc_fd__": true,
-                "index": 0
-            },
             "expected_idx": i
         });
 
@@ -364,22 +353,9 @@ async fn test_multiple_fds_single_message() -> Result<()> {
     let transport = UnixSocketTransport::new(stream).unwrap();
     let (mut sender, _receiver) = transport.split();
 
-    // Create params with multiple file descriptor placeholders
     let params = serde_json::json!({
-        "files": [
-            {
-                "__jsonrpc_fd__": true,
-                "index": 0
-            },
-            {
-                "__jsonrpc_fd__": true,
-                "index": 1
-            },
-            {
-                "__jsonrpc_fd__": true,
-                "index": 2
-            }
-        ]
+        "operation": "read_multiple",
+        "count": 3
     });
 
     let fds: Vec<OwnedFd> = temp_files
@@ -479,10 +455,7 @@ async fn test_mixed_messages_with_and_without_fds() -> Result<()> {
     let fd: OwnedFd = temp_file.into_file().into();
 
     let params2 = serde_json::json!({
-        "file": {
-            "__jsonrpc_fd__": true,
-            "index": 0
-        }
+        "operation": "read"
     });
 
     let request2 = JsonRpcRequest::new(
@@ -582,17 +555,10 @@ async fn test_large_number_of_fds() -> Result<()> {
     let transport = UnixSocketTransport::new(stream).unwrap();
     let (mut sender, _receiver) = transport.split();
 
-    // Create params with many file descriptor placeholders
-    let files: Vec<_> = (0..num_fds)
-        .map(|i| {
-            serde_json::json!({
-                "__jsonrpc_fd__": true,
-                "index": i
-            })
-        })
-        .collect();
-
-    let params = serde_json::json!({ "files": files });
+    let params = serde_json::json!({
+        "operation": "process_many",
+        "count": num_fds
+    });
 
     let fds: Vec<OwnedFd> = temp_files
         .into_iter()
@@ -670,11 +636,8 @@ async fn test_zero_byte_files_with_fds() -> Result<()> {
     let (mut sender, _receiver) = transport.split();
 
     let params = serde_json::json!({
-        "files": [
-            { "__jsonrpc_fd__": true, "index": 0 },
-            { "__jsonrpc_fd__": true, "index": 1 },
-            { "__jsonrpc_fd__": true, "index": 2 }
-        ]
+        "operation": "read_empty",
+        "count": 3
     });
 
     let fds: Vec<OwnedFd> = temp_files
@@ -763,11 +726,9 @@ async fn test_fd_placeholder_index_ordering() -> Result<()> {
     let transport = UnixSocketTransport::new(stream).unwrap();
     let (mut sender, _receiver) = transport.split();
 
-    // Create params with placeholders in non-sequential order to test protocol
     let params = serde_json::json!({
-        "file_2": { "__jsonrpc_fd__": true, "index": 2 },
-        "file_0": { "__jsonrpc_fd__": true, "index": 0 },
-        "file_1": { "__jsonrpc_fd__": true, "index": 1 }
+        "operation": "verify_ordering",
+        "count": 3
     });
 
     let fds: Vec<OwnedFd> = temp_files
@@ -863,7 +824,7 @@ async fn test_rapid_message_bursts() -> Result<()> {
 
             let params = serde_json::json!({
                 "burst_id": i,
-                "file": { "__jsonrpc_fd__": true, "index": 0 }
+                "has_file": true
             });
 
             (params, vec![fd])
@@ -971,8 +932,7 @@ async fn test_interleaved_requests_responses_notifications() -> Result<()> {
     let request1 = JsonRpcRequest::new(
         "interleaved_method".to_string(),
         Some(serde_json::json!({
-            "type": "with_fd",
-            "file": { "__jsonrpc_fd__": true, "index": 0 }
+            "type": "with_fd"
         })),
         Value::Number(1.into()),
     );
@@ -1013,8 +973,7 @@ async fn test_interleaved_requests_responses_notifications() -> Result<()> {
     let request3 = JsonRpcRequest::new(
         "interleaved_method".to_string(),
         Some(serde_json::json!({
-            "type": "with_fd",
-            "file": { "__jsonrpc_fd__": true, "index": 0 }
+            "type": "with_fd"
         })),
         Value::Number(3.into()),
     );
@@ -1042,8 +1001,7 @@ async fn test_interleaved_requests_responses_notifications() -> Result<()> {
     let request4 = JsonRpcRequest::new(
         "interleaved_method".to_string(),
         Some(serde_json::json!({
-            "type": "with_fd",
-            "file": { "__jsonrpc_fd__": true, "index": 0 }
+            "type": "with_fd"
         })),
         Value::Number(4.into()),
     );
@@ -1146,31 +1104,27 @@ async fn test_mismatched_fd_count_error() -> Result<()> {
         Ok::<(), jsonrpc_fdpass::Error>(())
     });
 
-    // Connect and send message that claims 2 FDs but only provides 1
+    // Connect and send message that claims 2 FDs but provides none
     let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
 
-    // Manually construct a message with placeholder mismatch
     use tokio::io::AsyncWriteExt;
     let mut stream = stream;
 
-    // JSON claims 2 FDs with indices 0 and 1, but we'll only send 1 FD
+    // JSON claims 2 FDs via the fds field, but we won't send any FDs
     let json_with_mismatch = serde_json::json!({
         "jsonrpc": "2.0",
         "method": "mismatch_test",
-        "params": {
-            "file1": { "__jsonrpc_fd__": true, "index": 0 },
-            "file2": { "__jsonrpc_fd__": true, "index": 1 }
-        },
-        "id": 1
+        "params": {},
+        "id": 1,
+        "fds": 2
     });
 
     let json_str = serde_json::to_string(&json_with_mismatch).unwrap();
 
-    // Send the JSON with ancillary data containing only 1 FD (but JSON expects 2)
+    // Don't use the temp file FD - we want the mismatch
     let _fd: OwnedFd = temp_file.into_file().into();
 
-    // We'd need to use lower-level socket operations to create this mismatch
-    // For now, just write the JSON to demonstrate the test structure
+    // Write the JSON without sending any FDs via ancillary data
     stream.write_all(json_str.as_bytes()).await.unwrap();
     stream.flush().await.unwrap();
 
@@ -1181,43 +1135,24 @@ async fn test_mismatched_fd_count_error() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_invalid_placeholder_indices() -> Result<()> {
+async fn test_fds_field_mismatch_too_few_fds() -> Result<()> {
     let temp_dir = TempDir::new().unwrap();
-    let socket_path = temp_dir.path().join("test_invalid_indices.sock");
-
-    // Create test files
-    let mut temp_files = Vec::new();
-    for i in 0..3 {
-        let mut temp_file = NamedTempFile::new().unwrap();
-        write!(temp_file, "File {}", i).unwrap();
-        temp_file.flush().unwrap();
-        temp_file.seek(SeekFrom::Start(0)).unwrap();
-        temp_files.push(temp_file);
-    }
+    let socket_path = temp_dir.path().join("test_fds_mismatch.sock");
 
     let listener = tokio::net::UnixListener::bind(&socket_path).unwrap();
 
     let server_handle = tokio::spawn(async move {
-        let mut server = Server::new();
-
-        server.register_method("invalid_indices_test", |_method, _params, _fds| {
-            panic!("Method should not be called due to invalid placeholder indices");
-        });
-
         if let Ok((stream, _)) = listener.accept().await {
             let transport = UnixSocketTransport::new(stream).unwrap();
-            let (mut sender, mut receiver) = transport.split();
+            let (_sender, mut receiver) = transport.split();
 
-            // Expect error when processing message with invalid placeholder indices
+            // Expect error when processing message with fds field mismatch
             match receiver.receive().await {
                 Err(e) => {
-                    println!("Successfully caught invalid placeholder error: {:?}", e);
+                    println!("Successfully caught fds mismatch error: {:?}", e);
                 }
-                Ok(message_with_fds) => {
-                    match server.process_message(message_with_fds, &mut sender).await {
-                        Err(_) => println!("Error caught during processing"),
-                        Ok(_) => panic!("Should have failed with invalid placeholder indices"),
-                    }
+                Ok(_) => {
+                    panic!("Should have failed with fds mismatch");
                 }
             }
         }
@@ -1225,41 +1160,24 @@ async fn test_invalid_placeholder_indices() -> Result<()> {
         Ok::<(), jsonrpc_fdpass::Error>(())
     });
 
-    // Connect and send message with invalid placeholder indices (non-dense range)
+    // Connect and send a message where fds field claims more FDs than are available
     let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
-    let transport = UnixSocketTransport::new(stream).unwrap();
-    let (mut sender, _receiver) = transport.split();
 
-    // Create params with invalid placeholder indices (0, 2, 4 instead of 0, 1, 2)
-    let params = serde_json::json!({
-        "files": [
-            { "__jsonrpc_fd__": true, "index": 0 },
-            { "__jsonrpc_fd__": true, "index": 2 },  // Invalid: should be 1
-            { "__jsonrpc_fd__": true, "index": 4 }   // Invalid: should be 2
-        ]
+    use tokio::io::AsyncWriteExt;
+    let mut stream = stream;
+
+    // JSON claims 3 FDs but we won't send any
+    let json_with_mismatch = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "test",
+        "params": {},
+        "id": 1,
+        "fds": 3
     });
 
-    let fds: Vec<OwnedFd> = temp_files
-        .into_iter()
-        .map(|tf| tf.into_file().into())
-        .collect();
-
-    let request = JsonRpcRequest::new(
-        "invalid_indices_test".to_string(),
-        Some(params),
-        Value::Number(1.into()),
-    );
-    let message = JsonRpcMessage::Request(request);
-    let message_with_fds = MessageWithFds::new(message, fds);
-
-    // This should fail during serialization or processing
-    match sender.send(message_with_fds).await {
-        Err(_) => println!("Successfully caught error during send"),
-        Ok(_) => {
-            // If send succeeds, the error should be caught by the receiver
-            println!("Send succeeded, error should be caught by receiver");
-        }
-    }
+    let json_str = serde_json::to_string(&json_with_mismatch).unwrap();
+    stream.write_all(json_str.as_bytes()).await.unwrap();
+    stream.flush().await.unwrap();
 
     // Clean up
     server_handle.abort();
@@ -1268,79 +1186,43 @@ async fn test_invalid_placeholder_indices() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_duplicate_placeholder_indices() -> Result<()> {
+async fn test_fds_field_zero_with_no_fds() -> Result<()> {
+    // Test that fds: 0 (or absent) works correctly when no FDs are sent
     let temp_dir = TempDir::new().unwrap();
-    let socket_path = temp_dir.path().join("test_duplicate_indices.sock");
-
-    // Create test files
-    let mut temp_files = Vec::new();
-    for i in 0..2 {
-        let mut temp_file = NamedTempFile::new().unwrap();
-        write!(temp_file, "File {}", i).unwrap();
-        temp_file.flush().unwrap();
-        temp_file.seek(SeekFrom::Start(0)).unwrap();
-        temp_files.push(temp_file);
-    }
+    let socket_path = temp_dir.path().join("test_fds_zero.sock");
 
     let listener = tokio::net::UnixListener::bind(&socket_path).unwrap();
 
     let server_handle = tokio::spawn(async move {
         let mut server = Server::new();
 
-        server.register_method("duplicate_indices_test", |_method, _params, _fds| {
-            panic!("Method should not be called due to duplicate placeholder indices");
+        server.register_method("test", |_method, params, fds| {
+            assert!(fds.is_empty(), "Expected no FDs");
+            Ok((params, Vec::new()))
         });
 
         if let Ok((stream, _)) = listener.accept().await {
             let transport = UnixSocketTransport::new(stream).unwrap();
             let (mut sender, mut receiver) = transport.split();
 
-            match receiver.receive().await {
-                Err(e) => {
-                    println!("Successfully caught duplicate placeholder error: {:?}", e);
-                }
-                Ok(message_with_fds) => {
-                    match server.process_message(message_with_fds, &mut sender).await {
-                        Err(_) => println!("Error caught during processing"),
-                        Ok(_) => panic!("Should have failed with duplicate placeholder indices"),
-                    }
-                }
+            if let Ok(message_with_fds) = receiver.receive().await {
+                let _ = server.process_message(message_with_fds, &mut sender).await;
             }
         }
 
         Ok::<(), jsonrpc_fdpass::Error>(())
     });
 
-    // Connect and send message with duplicate placeholder indices
     let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
     let transport = UnixSocketTransport::new(stream).unwrap();
     let (mut sender, _receiver) = transport.split();
 
-    // Create params with duplicate placeholder indices
-    let params = serde_json::json!({
-        "files": [
-            { "__jsonrpc_fd__": true, "index": 0 },
-            { "__jsonrpc_fd__": true, "index": 0 }  // Duplicate index 0
-        ]
-    });
-
-    let fds: Vec<OwnedFd> = temp_files
-        .into_iter()
-        .map(|tf| tf.into_file().into())
-        .collect();
-
-    let request = JsonRpcRequest::new(
-        "duplicate_indices_test".to_string(),
-        Some(params),
-        Value::Number(1.into()),
-    );
+    let params = serde_json::json!({ "data": "test" });
+    let request = JsonRpcRequest::new("test".to_string(), Some(params), Value::Number(1.into()));
     let message = JsonRpcMessage::Request(request);
-    let message_with_fds = MessageWithFds::new(message, fds);
+    let message_with_fds = MessageWithFds::new(message, vec![]);
 
-    match sender.send(message_with_fds).await {
-        Err(_) => println!("Successfully caught error during send"),
-        Ok(_) => println!("Send succeeded, error should be caught by receiver"),
-    }
+    sender.send(message_with_fds).await?;
 
     // Clean up
     server_handle.abort();
@@ -1349,13 +1231,13 @@ async fn test_duplicate_placeholder_indices() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_no_placeholders_but_fds_provided() -> Result<()> {
+async fn test_fds_with_positional_semantics() -> Result<()> {
     let temp_dir = TempDir::new().unwrap();
-    let socket_path = temp_dir.path().join("test_dangling_fds.sock");
+    let socket_path = temp_dir.path().join("test_positional_fds.sock");
 
     // Create test file
     let mut temp_file = NamedTempFile::new().unwrap();
-    write!(temp_file, "Dangling FD content").unwrap();
+    write!(temp_file, "Positional FD content").unwrap();
     temp_file.flush().unwrap();
     temp_file.seek(SeekFrom::Start(0)).unwrap();
 
@@ -1364,65 +1246,51 @@ async fn test_no_placeholders_but_fds_provided() -> Result<()> {
     let server_handle = tokio::spawn(async move {
         let mut server = Server::new();
 
-        server.register_method("dangling_fds_test", |_method, _params, fds| {
-            // According to spec, this is non-compliant but may be handled
-            // The FDs should be cleaned up
-            if !fds.is_empty() {
-                return Err(jsonrpc_fdpass::Error::InvalidMessage(
-                    "Received FDs but no placeholders in message".to_string(),
-                ));
-            }
-            Ok((
-                Some(Value::String("No FDs processed".to_string())),
-                Vec::new(),
-            ))
+        server.register_method("read_positional", |_method, _params, fds| {
+            assert_eq!(fds.len(), 1, "Expected 1 FD");
+
+            let fd = fds.into_iter().next().unwrap();
+            let mut file = File::from(fd);
+            let mut contents = String::new();
+            file.seek(SeekFrom::Start(0)).unwrap();
+            file.read_to_string(&mut contents).unwrap();
+
+            assert_eq!(contents.trim(), "Positional FD content");
+            Ok((Some(Value::String(contents)), Vec::new()))
         });
 
         if let Ok((stream, _)) = listener.accept().await {
             let transport = UnixSocketTransport::new(stream).unwrap();
             let (mut sender, mut receiver) = transport.split();
 
-            match receiver.receive().await {
-                Err(e) => {
-                    println!("Successfully caught dangling FD error: {:?}", e);
-                }
-                Ok(message_with_fds) => {
-                    match server.process_message(message_with_fds, &mut sender).await {
-                        Err(_) => println!("Error caught during processing - expected behavior"),
-                        Ok(_) => println!("Processing succeeded - FDs were handled"),
-                    }
-                }
+            if let Ok(message_with_fds) = receiver.receive().await {
+                let _ = server.process_message(message_with_fds, &mut sender).await;
             }
         }
 
         Ok::<(), jsonrpc_fdpass::Error>(())
     });
 
-    // Connect and send message with FDs but no placeholders
     let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
     let transport = UnixSocketTransport::new(stream).unwrap();
     let (mut sender, _receiver) = transport.split();
 
-    // Create params with NO file descriptor placeholders
     let params = serde_json::json!({
-        "message": "This message has no FD placeholders"
+        "message": "test"
     });
 
     let fd: OwnedFd = temp_file.into_file().into();
 
     let request = JsonRpcRequest::new(
-        "dangling_fds_test".to_string(),
+        "read_positional".to_string(),
         Some(params),
         Value::Number(1.into()),
     );
     let message = JsonRpcMessage::Request(request);
-    // But we still provide FDs - this should cause an error
+    // The fds field will be automatically set to 1 during serialization
     let message_with_fds = MessageWithFds::new(message, vec![fd]);
 
-    match sender.send(message_with_fds).await {
-        Err(_) => println!("Successfully caught error during send"),
-        Ok(_) => println!("Send succeeded, error should be caught by receiver"),
-    }
+    sender.send(message_with_fds).await?;
 
     // Clean up
     server_handle.abort();
@@ -1469,7 +1337,7 @@ async fn test_connection_drop_with_pending_fds() -> Result<()> {
         let (mut sender, _receiver) = transport.split();
 
         let params = serde_json::json!({
-            "file": { "__jsonrpc_fd__": true, "index": 0 }
+            "operation": "test"
         });
 
         let fd: OwnedFd = temp_file.into_file().into();
@@ -1555,10 +1423,8 @@ async fn test_large_message_with_fds() -> Result<()> {
     let transport = UnixSocketTransport::new(stream).unwrap();
     let (mut sender, _receiver) = transport.split();
 
-    // Create params with large data and FD placeholder
     let large_data = "Y".repeat(50000); // Large JSON parameter
     let params = serde_json::json!({
-        "file": { "__jsonrpc_fd__": true, "index": 0 },
         "large_data": large_data,
         "description": "Testing large message with file descriptor"
     });
@@ -1582,50 +1448,49 @@ async fn test_large_message_with_fds() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_malformed_placeholder_structure() -> Result<()> {
+async fn test_invalid_fds_field_type() -> Result<()> {
+    // Test that invalid fds field (non-integer) is handled gracefully
     let temp_dir = TempDir::new().unwrap();
-    let socket_path = temp_dir.path().join("test_malformed_placeholder.sock");
+    let socket_path = temp_dir.path().join("test_invalid_fds_type.sock");
 
     let listener = tokio::net::UnixListener::bind(&socket_path).unwrap();
 
     let server_handle = tokio::spawn(async move {
+        let mut server = Server::new();
+
+        server.register_method("test", |_method, params, fds| {
+            // With invalid fds field, it should be treated as 0
+            assert!(fds.is_empty(), "Expected no FDs when fds field is invalid");
+            Ok((params, Vec::new()))
+        });
+
         if let Ok((stream, _)) = listener.accept().await {
             let transport = UnixSocketTransport::new(stream).unwrap();
-            let (_sender, mut receiver) = transport.split();
+            let (mut sender, mut receiver) = transport.split();
 
-            match receiver.receive().await {
-                Err(e) => {
-                    println!("Successfully caught malformed placeholder error: {:?}", e);
-                }
-                Ok(_) => {
-                    println!("Unexpectedly parsed malformed placeholder");
-                }
+            if let Ok(message_with_fds) = receiver.receive().await {
+                let _ = server.process_message(message_with_fds, &mut sender).await;
             }
         }
 
         Ok::<(), jsonrpc_fdpass::Error>(())
     });
 
-    // Connect and send message with malformed placeholder
     let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
 
     use tokio::io::AsyncWriteExt;
     let mut stream = stream;
 
-    // Manually create malformed JSON with invalid placeholder structure
-    let malformed_json = serde_json::json!({
+    // fds field is a string instead of number - should be treated as 0
+    let json_with_invalid_fds = serde_json::json!({
         "jsonrpc": "2.0",
         "method": "test",
-        "params": {
-            "file": {
-                "__jsonrpc_fd__": "not_boolean",  // Should be boolean true
-                "index": "not_number"             // Should be number
-            }
-        },
-        "id": 1
+        "params": { "data": "test" },
+        "id": 1,
+        "fds": "not_a_number"
     });
 
-    let json_str = serde_json::to_string(&malformed_json).unwrap();
+    let json_str = serde_json::to_string(&json_with_invalid_fds).unwrap();
     stream.write_all(json_str.as_bytes()).await.unwrap();
     stream.flush().await.unwrap();
 
@@ -2006,11 +1871,7 @@ async fn test_large_message_with_fd() -> Result<()> {
     let request = JsonRpcRequest::new(
         "large_data_with_fd".to_string(),
         Some(serde_json::json!({
-            "data": large_data,
-            "file": {
-                "__jsonrpc_fd__": true,
-                "index": 0
-            }
+            "data": large_data
         })),
         Value::Number(1.into()),
     );

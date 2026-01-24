@@ -68,7 +68,7 @@ Opens a destination for writing container images.
 
 Writes blob data (layers, configs) to the destination via file descriptor.
 
-**Request:**
+**Request (with 1 FD: data pipe):**
 ```json
 {
   "jsonrpc": "2.0", 
@@ -83,17 +83,14 @@ Writes blob data (layers, configs) to the destination via file descriptor.
         "org.opencontainers.image.title": "application layer"
       }
     },
-    "isConfig": false,
-    "dataPipe": {
-      "__jsonrpc_fd__": true,
-      "index": 0
-    }
+    "isConfig": false
   },
-  "id": 2
+  "id": 2,
+  "fds": 1
 }
 ```
 
-**Response:**
+**Response (with 1 FD: progress pipe):**
 ```json
 {
   "jsonrpc": "2.0",
@@ -106,13 +103,10 @@ Writes blob data (layers, configs) to the destination via file descriptor.
       "urls": [
         "https://quay.io/v2/myorg/myimage/blobs/sha256:abc123..."
       ]
-    },
-    "progressPipe": {
-      "__jsonrpc_fd__": true,
-      "index": 1
     }
   },
-  "id": 2
+  "id": 2,
+  "fds": 1
 }
 ```
 
@@ -424,13 +418,13 @@ A complete image push demonstrates the API's efficiency advantages:
 → {"jsonrpc": "2.0", "method": "TryReusingBlob", "params": {"destinationID": 100, "blobInfo": {"digest": "sha256:base123..."}}, "id": 2}
 ← {"jsonrpc": "2.0", "result": {"reused": true}, "id": 2}
 
-# 3. Upload application layer (new blob)
-→ {"jsonrpc": "2.0", "method": "PutBlob", "params": {"destinationID": 100, "blobInfo": {"digest": "sha256:app456..."}, "dataPipe": {"__jsonrpc_fd__": true, "index": 0}}, "id": 3}
+# 3. Upload application layer (new blob, 1 FD attached)
+→ {"jsonrpc": "2.0", "method": "PutBlob", "params": {"destinationID": 100, "blobInfo": {"digest": "sha256:app456..."}}, "id": 3, "fds": 1}
    [FD 0 contains compressed tar stream]
 ← {"jsonrpc": "2.0", "result": {"blobInfo": {"digest": "sha256:app456...", "size": 1024000}}, "id": 3}
 
-# 4. Upload config blob
-→ {"jsonrpc": "2.0", "method": "PutBlob", "params": {"destinationID": 100, "blobInfo": {"digest": "sha256:config789..."}, "isConfig": true, "dataPipe": {"__jsonrpc_fd__": true, "index": 0}}, "id": 4}
+# 4. Upload config blob (1 FD attached)
+→ {"jsonrpc": "2.0", "method": "PutBlob", "params": {"destinationID": 100, "blobInfo": {"digest": "sha256:config789..."}, "isConfig": true}, "id": 4, "fds": 1}
 ← {"jsonrpc": "2.0", "result": {"blobInfo": {"digest": "sha256:config789..."}}, "id": 4}
 
 # 5. Write manifest
@@ -450,7 +444,7 @@ A complete image push demonstrates the API's efficiency advantages:
 
 **Chunked Transfer:** Large blob uploads can be split into resumable chunks:
 
-**Request:**
+**Request (with 1 FD: data pipe):**
 ```json
 {
   "jsonrpc": "2.0",
@@ -459,19 +453,16 @@ A complete image push demonstrates the API's efficiency advantages:
     "destinationID": 67890,
     "uploadID": "chunk-session-123",
     "chunkIndex": 0,
-    "chunkSize": 8388608,
-    "dataPipe": {
-      "__jsonrpc_fd__": true,
-      "index": 0
-    }
+    "chunkSize": 8388608
   },
-  "id": 10
+  "id": 10,
+  "fds": 1
 }
 ```
 
 **Delta Uploads:** Similar layers can leverage delta compression:
 
-**Request:**
+**Request (with 1 FD: delta pipe):**
 ```json
 {
   "jsonrpc": "2.0",
@@ -479,13 +470,10 @@ A complete image push demonstrates the API's efficiency advantages:
   "params": {
     "destinationID": 67890,
     "baseDigest": "sha256:base123...",
-    "targetDigest": "sha256:target456...",
-    "deltaPipe": {
-      "__jsonrpc_fd__": true,
-      "index": 0
-    }
+    "targetDigest": "sha256:target456..."
   },
-  "id": 11
+  "id": 11,
+  "fds": 1
 }
 ```
 
