@@ -26,7 +26,7 @@ JSON is a self-delimiting format—a compliant parser can determine where one JS
 
 * The JSON text MUST be encoded using UTF-8.
 * Each message MUST be a complete, valid JSON object.
-* Whitespace between messages is permitted but not required.
+* Whitespace between messages is permitted but not required. Per RFC 8259, the valid whitespace characters are: space (`0x20`), tab (`0x09`), line feed (`0x0A`), and carriage return (`0x0D`). Receivers MUST use a streaming JSON parser that skips such whitespace between values. (Note: inter-message whitespace is actively used by the FD batching mechanism; see Section 4.1.)
 
 ### 2.3. Transmission Rules
 
@@ -64,6 +64,16 @@ File descriptors MUST be passed using ancillary data via the sendmsg(2) and recv
 
 * The control message header (cmsghdr) MUST specify cmsg_level as SOL_SOCKET and cmsg_type as SCM_RIGHTS.
 * The control message data (CMSG_DATA) MUST contain the array of integer file descriptors.
+
+### 4.1. FD Batching
+
+Operating systems impose limits on the number of file descriptors that can be passed in a single sendmsg() call. These limits vary by platform and generally cannot be queried at runtime.
+
+When a message requires more file descriptors than can be sent in a single sendmsg() call, the additional FDs MUST be sent before any bytes of the next message. Since some systems require non-empty data for ancillary data delivery, these continuation calls MUST send a single whitespace byte (space, `0x20`) as payload. The receiver's JSON parser will ignore inter-message whitespace per RFC 8259.
+
+This ensures the receiver can dispatch each message as soon as it is fully parsed, without buffering subsequent messages while waiting for FDs.
+
+Implementations SHOULD use a batch size in the range of 200-500 FDs and handle `EINVAL` (or equivalent) by reducing the batch size and retrying.
 
 ## 5. Receiver Logic
 

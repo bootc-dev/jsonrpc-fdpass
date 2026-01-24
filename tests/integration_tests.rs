@@ -5,6 +5,7 @@ use jsonrpc_fdpass::{
 use serde_json::Value;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
+use std::num::NonZeroUsize;
 use std::os::unix::io::OwnedFd;
 use tempfile::{NamedTempFile, TempDir};
 
@@ -1883,5 +1884,367 @@ async fn test_large_message_with_fd() -> Result<()> {
     // Wait for server to process and verify
     server_handle.await.unwrap()?;
 
+    Ok(())
+}
+
+// =============================================================================
+// FD Batching Tests
+// =============================================================================
+// These tests exercise the FD batching mechanism when sending more FDs than
+// can fit in a single sendmsg() call. By configuring the sender's
+// max_fds_per_sendmsg to small values, we can test the batching logic without
+// needing to create hundreds of real file descriptors.
+
+/// Test sending multiple FDs with a very low batch limit (1 FD per sendmsg).
+/// This forces maximum batching - each FD requires a separate sendmsg call.
+#[tokio::test]
+async fn test_fd_batching_one_per_message() -> Result<()> {
+    let temp_dir = TempDir::new().unwrap();
+    let socket_path = temp_dir.path().join("test_batch_1.sock");
+
+    // Create test files
+    let num_fds = 5;
+    let mut temp_files = Vec::new();
+    for i in 0..num_fds {
+        let mut temp_file = NamedTempFile::new().unwrap();
+        write!(temp_file, "Batch test file {}", i).unwrap();
+        temp_file.flush().unwrap();
+        temp_file.seek(SeekFrom::Start(0)).unwrap();
+        temp_files.push(temp_file);
+    }
+
+    let listener = tokio::net::UnixListener::bind(&socket_path).unwrap();
+
+    let server_handle = tokio::spawn(async move {
+        let mut server = Server::new();
+
+        server.register_method("verify_fds", move |_method, _params, fds| {
+            assert_eq!(fds.len(), num_fds, "Expected {} file descriptors", num_fds);
+
+            // Verify each FD has correct content in order
+            for (i, fd) in fds.into_iter().enumerate() {
+                let mut file = File::from(fd);
+                let mut contents = String::new();
+                file.seek(SeekFrom::Start(0)).unwrap();
+                file.read_to_string(&mut contents).unwrap();
+
+                let expected = format!("Batch test file {}", i);
+                assert_eq!(contents.trim(), expected, "FD {} has wrong content", i);
+            }
+
+            Ok((Some(Value::String("All FDs verified".to_string())), Vec::new()))
+        });
+
+        if let Ok((stream, _)) = listener.accept().await {
+            let transport = UnixSocketTransport::new(stream).unwrap();
+            let (mut sender, mut receiver) = transport.split();
+
+            if let Ok(message_with_fds) = receiver.receive().await {
+                let _ = server.process_message(message_with_fds, &mut sender).await;
+            }
+        }
+
+        Ok::<(), jsonrpc_fdpass::Error>(())
+    });
+
+    let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
+    let transport = UnixSocketTransport::new(stream).unwrap();
+    let (mut sender, _receiver) = transport.split();
+
+    // Set max FDs per sendmsg to 1, forcing maximum batching
+    sender.set_max_fds_per_sendmsg(NonZeroUsize::new(1).unwrap());
+
+    let fds: Vec<OwnedFd> = temp_files
+        .into_iter()
+        .map(|tf| tf.into_file().into())
+        .collect();
+
+    let request = JsonRpcRequest::new(
+        "verify_fds".to_string(),
+        Some(serde_json::json!({ "count": num_fds })),
+        Value::Number(1.into()),
+    );
+    let message = JsonRpcMessage::Request(request);
+    let message_with_fds = MessageWithFds::new(message, fds);
+
+    sender.send(message_with_fds).await?;
+
+    server_handle.abort();
+    Ok(())
+}
+
+/// Test sending multiple FDs with batch limit of 2.
+#[tokio::test]
+async fn test_fd_batching_two_per_message() -> Result<()> {
+    let temp_dir = TempDir::new().unwrap();
+    let socket_path = temp_dir.path().join("test_batch_2.sock");
+
+    let num_fds = 7; // Odd number to test partial final batch
+    let mut temp_files = Vec::new();
+    for i in 0..num_fds {
+        let mut temp_file = NamedTempFile::new().unwrap();
+        write!(temp_file, "File number {}", i).unwrap();
+        temp_file.flush().unwrap();
+        temp_file.seek(SeekFrom::Start(0)).unwrap();
+        temp_files.push(temp_file);
+    }
+
+    let listener = tokio::net::UnixListener::bind(&socket_path).unwrap();
+
+    let server_handle = tokio::spawn(async move {
+        let mut server = Server::new();
+
+        server.register_method("verify_fds", move |_method, _params, fds| {
+            assert_eq!(fds.len(), num_fds);
+
+            for (i, fd) in fds.into_iter().enumerate() {
+                let mut file = File::from(fd);
+                let mut contents = String::new();
+                file.seek(SeekFrom::Start(0)).unwrap();
+                file.read_to_string(&mut contents).unwrap();
+
+                let expected = format!("File number {}", i);
+                assert_eq!(contents.trim(), expected);
+            }
+
+            Ok((Some(Value::Number(num_fds.into())), Vec::new()))
+        });
+
+        if let Ok((stream, _)) = listener.accept().await {
+            let transport = UnixSocketTransport::new(stream).unwrap();
+            let (mut sender, mut receiver) = transport.split();
+
+            if let Ok(message_with_fds) = receiver.receive().await {
+                let _ = server.process_message(message_with_fds, &mut sender).await;
+            }
+        }
+
+        Ok::<(), jsonrpc_fdpass::Error>(())
+    });
+
+    let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
+    let transport = UnixSocketTransport::new(stream).unwrap();
+    let (mut sender, _receiver) = transport.split();
+
+    // Set max FDs per sendmsg to 2
+    sender.set_max_fds_per_sendmsg(NonZeroUsize::new(2).unwrap());
+
+    let fds: Vec<OwnedFd> = temp_files
+        .into_iter()
+        .map(|tf| tf.into_file().into())
+        .collect();
+
+    let request = JsonRpcRequest::new(
+        "verify_fds".to_string(),
+        Some(serde_json::json!({ "count": num_fds })),
+        Value::Number(1.into()),
+    );
+    let message = JsonRpcMessage::Request(request);
+    let message_with_fds = MessageWithFds::new(message, fds);
+
+    sender.send(message_with_fds).await?;
+
+    server_handle.abort();
+    Ok(())
+}
+
+/// Test interleaved messages with and without FDs under batching constraints.
+#[tokio::test]
+async fn test_fd_batching_interleaved_with_no_fd_messages() -> Result<()> {
+    let temp_dir = TempDir::new().unwrap();
+    let socket_path = temp_dir.path().join("test_batch_interleaved.sock");
+
+    let listener = tokio::net::UnixListener::bind(&socket_path).unwrap();
+
+    let server_handle = tokio::spawn(async move {
+        let mut server = Server::new();
+
+        server.register_method("with_fds", |_method, params, fds| {
+            let expected = params
+                .as_ref()
+                .and_then(|p| p.get("expected_fds"))
+                .and_then(|v| v.as_u64())
+                .unwrap() as usize;
+            assert_eq!(fds.len(), expected);
+            Ok((Some(Value::String("got_fds".to_string())), Vec::new()))
+        });
+
+        server.register_method("no_fds", |_method, _params, fds| {
+            assert!(fds.is_empty(), "no_fds method received unexpected FDs");
+            Ok((Some(Value::String("no_fds".to_string())), Vec::new()))
+        });
+
+        if let Ok((stream, _)) = listener.accept().await {
+            let transport = UnixSocketTransport::new(stream).unwrap();
+            let (mut sender, mut receiver) = transport.split();
+
+            // Process 5 messages: FDs, no FDs, FDs, no FDs, FDs
+            for _ in 0..5 {
+                if let Ok(message_with_fds) = receiver.receive().await {
+                    let _ = server.process_message(message_with_fds, &mut sender).await;
+                }
+            }
+        }
+
+        Ok::<(), jsonrpc_fdpass::Error>(())
+    });
+
+    let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
+    let transport = UnixSocketTransport::new(stream).unwrap();
+    let (mut sender, _receiver) = transport.split();
+
+    // Very aggressive batching
+    sender.set_max_fds_per_sendmsg(NonZeroUsize::new(1).unwrap());
+
+    // Message 1: 3 FDs
+    {
+        let mut temp_files = Vec::new();
+        for i in 0..3 {
+            let mut tf = NamedTempFile::new().unwrap();
+            write!(tf, "msg1-{}", i).unwrap();
+            tf.flush().unwrap();
+            temp_files.push(tf);
+        }
+        let fds: Vec<OwnedFd> = temp_files.into_iter().map(|tf| tf.into_file().into()).collect();
+        let request = JsonRpcRequest::new(
+            "with_fds".to_string(),
+            Some(serde_json::json!({ "expected_fds": 3 })),
+            Value::Number(1.into()),
+        );
+        sender.send(MessageWithFds::new(JsonRpcMessage::Request(request), fds)).await?;
+    }
+
+    // Message 2: No FDs
+    {
+        let request = JsonRpcRequest::new(
+            "no_fds".to_string(),
+            Some(serde_json::json!({ "check": "first" })),
+            Value::Number(2.into()),
+        );
+        sender.send(MessageWithFds::new(JsonRpcMessage::Request(request), vec![])).await?;
+    }
+
+    // Message 3: 2 FDs
+    {
+        let mut temp_files = Vec::new();
+        for i in 0..2 {
+            let mut tf = NamedTempFile::new().unwrap();
+            write!(tf, "msg3-{}", i).unwrap();
+            tf.flush().unwrap();
+            temp_files.push(tf);
+        }
+        let fds: Vec<OwnedFd> = temp_files.into_iter().map(|tf| tf.into_file().into()).collect();
+        let request = JsonRpcRequest::new(
+            "with_fds".to_string(),
+            Some(serde_json::json!({ "expected_fds": 2 })),
+            Value::Number(3.into()),
+        );
+        sender.send(MessageWithFds::new(JsonRpcMessage::Request(request), fds)).await?;
+    }
+
+    // Message 4: No FDs
+    {
+        let request = JsonRpcRequest::new(
+            "no_fds".to_string(),
+            Some(serde_json::json!({ "check": "second" })),
+            Value::Number(4.into()),
+        );
+        sender.send(MessageWithFds::new(JsonRpcMessage::Request(request), vec![])).await?;
+    }
+
+    // Message 5: 4 FDs
+    {
+        let mut temp_files = Vec::new();
+        for i in 0..4 {
+            let mut tf = NamedTempFile::new().unwrap();
+            write!(tf, "msg5-{}", i).unwrap();
+            tf.flush().unwrap();
+            temp_files.push(tf);
+        }
+        let fds: Vec<OwnedFd> = temp_files.into_iter().map(|tf| tf.into_file().into()).collect();
+        let request = JsonRpcRequest::new(
+            "with_fds".to_string(),
+            Some(serde_json::json!({ "expected_fds": 4 })),
+            Value::Number(5.into()),
+        );
+        sender.send(MessageWithFds::new(JsonRpcMessage::Request(request), fds)).await?;
+    }
+
+    server_handle.abort();
+    Ok(())
+}
+
+/// Test large number of FDs with small batch size to stress the batching logic.
+#[tokio::test]
+async fn test_fd_batching_many_fds_small_batches() -> Result<()> {
+    let temp_dir = TempDir::new().unwrap();
+    let socket_path = temp_dir.path().join("test_batch_stress.sock");
+
+    let num_fds = 20;
+    let mut temp_files = Vec::new();
+    for i in 0..num_fds {
+        let mut temp_file = NamedTempFile::new().unwrap();
+        write!(temp_file, "stress-{:02}", i).unwrap();
+        temp_file.flush().unwrap();
+        temp_file.seek(SeekFrom::Start(0)).unwrap();
+        temp_files.push(temp_file);
+    }
+
+    let listener = tokio::net::UnixListener::bind(&socket_path).unwrap();
+
+    let server_handle = tokio::spawn(async move {
+        let mut server = Server::new();
+
+        server.register_method("stress_test", move |_method, _params, fds| {
+            assert_eq!(fds.len(), num_fds);
+
+            for (i, fd) in fds.into_iter().enumerate() {
+                let mut file = File::from(fd);
+                let mut contents = String::new();
+                file.seek(SeekFrom::Start(0)).unwrap();
+                file.read_to_string(&mut contents).unwrap();
+
+                let expected = format!("stress-{:02}", i);
+                assert_eq!(contents.trim(), expected, "FD {} mismatch", i);
+            }
+
+            Ok((Some(Value::Number(num_fds.into())), Vec::new()))
+        });
+
+        if let Ok((stream, _)) = listener.accept().await {
+            let transport = UnixSocketTransport::new(stream).unwrap();
+            let (mut sender, mut receiver) = transport.split();
+
+            if let Ok(message_with_fds) = receiver.receive().await {
+                let _ = server.process_message(message_with_fds, &mut sender).await;
+            }
+        }
+
+        Ok::<(), jsonrpc_fdpass::Error>(())
+    });
+
+    let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
+    let transport = UnixSocketTransport::new(stream).unwrap();
+    let (mut sender, _receiver) = transport.split();
+
+    // Very small batch size: 20 FDs with batch size 3 = 7 batches
+    sender.set_max_fds_per_sendmsg(NonZeroUsize::new(3).unwrap());
+
+    let fds: Vec<OwnedFd> = temp_files
+        .into_iter()
+        .map(|tf| tf.into_file().into())
+        .collect();
+
+    let request = JsonRpcRequest::new(
+        "stress_test".to_string(),
+        Some(serde_json::json!({ "fd_count": num_fds })),
+        Value::Number(1.into()),
+    );
+    let message = JsonRpcMessage::Request(request);
+    let message_with_fds = MessageWithFds::new(message, fds);
+
+    sender.send(message_with_fds).await?;
+
+    server_handle.abort();
     Ok(())
 }

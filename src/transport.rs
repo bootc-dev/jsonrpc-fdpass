@@ -7,14 +7,24 @@ use rustix::net::{
 };
 use std::collections::VecDeque;
 use std::io::{self, IoSlice, IoSliceMut};
+use std::num::NonZeroUsize;
 use std::os::unix::io::OwnedFd;
 use std::sync::Arc;
 use tokio::io::Interest;
 use tokio::net::UnixStream as TokioUnixStream;
 use tracing::{debug, trace};
 
-/// Maximum number of file descriptors per message.
-const MAX_FDS_PER_MESSAGE: usize = 8;
+/// Default maximum number of file descriptors per sendmsg() call.
+///
+/// Platform limits for SCM_RIGHTS vary (e.g., ~253 on Linux, ~512 on macOS).
+/// We start with an optimistic value; if sendmsg() fails with EINVAL, the
+/// batch size is automatically reduced and the send is retried.
+pub const DEFAULT_MAX_FDS_PER_SENDMSG: NonZeroUsize = NonZeroUsize::new(500).unwrap();
+
+/// Maximum FDs to expect in a single recvmsg() call.
+/// Must be at least as large as the largest platform limit (~512 on macOS).
+const MAX_FDS_PER_RECVMSG: usize = 512;
+
 /// Read buffer size for incoming data.
 const READ_BUFFER_SIZE: usize = 4096;
 
@@ -34,6 +44,7 @@ impl UnixSocketTransport {
             Sender {
                 stream: Arc::clone(&stream),
                 pretty: false,
+                max_fds_per_sendmsg: DEFAULT_MAX_FDS_PER_SENDMSG,
             },
             Receiver {
                 stream,
@@ -47,6 +58,8 @@ impl UnixSocketTransport {
 pub struct Sender {
     stream: Arc<TokioUnixStream>,
     pretty: bool,
+    /// Maximum FDs to send per sendmsg() call. Configurable for testing.
+    max_fds_per_sendmsg: NonZeroUsize,
 }
 
 impl Sender {
@@ -57,6 +70,16 @@ impl Sender {
     /// expect human-readable JSON.
     pub fn set_pretty(&mut self, pretty: bool) {
         self.pretty = pretty;
+    }
+
+    /// Set the maximum number of file descriptors to send per sendmsg() call.
+    ///
+    /// This is primarily useful for testing FD batching behavior. The default
+    /// value ([`DEFAULT_MAX_FDS_PER_SENDMSG`]) is optimistic and may exceed
+    /// some platform limits; if sendmsg() returns `EINVAL`, the batch size is
+    /// automatically reduced and the send is retried.
+    pub fn set_max_fds_per_sendmsg(&mut self, max_fds: NonZeroUsize) {
+        self.max_fds_per_sendmsg = max_fds;
     }
 
     pub async fn send(&mut self, message_with_fds: MessageWithFds) -> Result<()> {
@@ -75,25 +98,33 @@ impl Sender {
 
         let fds = message_with_fds.file_descriptors;
 
-        // Track how many bytes we've sent so far
+        // Track how many bytes and FDs we've sent so far
         let mut bytes_sent = 0usize;
-        // FDs are only sent with the first sendmsg call
-        let mut fds_sent = false;
+        let mut fds_sent = 0usize;
 
-        while bytes_sent < data.len() {
-            let remaining = &data[bytes_sent..];
+        // Current max FDs per batch - may be reduced if we hit EINVAL
+        let mut current_max_fds = self.max_fds_per_sendmsg.get();
 
-            let sent = self
+        // Send data with FDs in batches. Each sendmsg can only handle a limited number of FDs.
+        // We send FDs with the data chunks, and any remaining FDs after all data is sent.
+        while bytes_sent < data.len() || fds_sent < fds.len() {
+            let remaining_data = &data[bytes_sent..];
+            let remaining_fds = &fds[fds_sent..];
+
+            // Determine how many FDs to send in this batch (up to current_max_fds)
+            let fds_batch = remaining_fds.get(..current_max_fds).unwrap_or(remaining_fds);
+
+            let result = self
                 .stream
                 .async_io(Interest::WRITABLE, || {
                     let sockfd = self.stream.as_fd();
 
-                    if !fds_sent && !fds.is_empty() {
-                        // First chunk with FDs: use sendmsg with ancillary data
-                        let borrowed_fds: Vec<_> = fds.iter().map(|fd| fd.as_fd()).collect();
+                    if !fds_batch.is_empty() {
+                        // Send with FDs using sendmsg with ancillary data
+                        let borrowed_fds: Vec<_> = fds_batch.iter().map(|fd| fd.as_fd()).collect();
 
                         let mut buffer: Vec<u8> =
-                            vec![0u8; rustix::cmsg_space!(ScmRights(MAX_FDS_PER_MESSAGE))];
+                            vec![0u8; rustix::cmsg_space!(ScmRights(MAX_FDS_PER_RECVMSG))];
                         let mut control = SendAncillaryBuffer::new(buffer.as_mut_slice());
 
                         if !control.push(SendAncillaryMessage::ScmRights(&borrowed_fds)) {
@@ -102,36 +133,83 @@ impl Sender {
                             ));
                         }
 
-                        let iov = [IoSlice::new(remaining)];
-                        let sent =
-                            rustix::net::sendmsg(sockfd, &iov, &mut control, SendFlags::empty())
-                                .map_err(|e| to_io_error(e, "sendmsg"))?;
+                        // If we have data to send, include it; otherwise send a minimal byte
+                        // (some systems require non-empty iov for ancillary data)
+                        let iov = if !remaining_data.is_empty() {
+                            [IoSlice::new(remaining_data)]
+                        } else {
+                            // Send a space byte that will be ignored by the receiver's JSON parser.
+                            // RFC 8259 defines space (0x20) as insignificant whitespace, and
+                            // serde_json's StreamDeserializer skips whitespace between values.
+                            [IoSlice::new(b" ")]
+                        };
 
-                        Ok(sent)
+                        rustix::net::sendmsg(sockfd, &iov, &mut control, SendFlags::empty())
+                            .map_err(|e| to_io_error(e, "sendmsg"))
+                    } else if !remaining_data.is_empty() {
+                        // No FDs left, just send remaining data
+                        rustix::net::send(sockfd, remaining_data, SendFlags::empty())
+                            .map_err(|e| to_io_error(e, "send"))
                     } else {
-                        // No FDs or FDs already sent: use regular send
-                        let sent = rustix::net::send(sockfd, remaining, SendFlags::empty())
-                            .map_err(|e| to_io_error(e, "send"))?;
-                        Ok(sent)
+                        // Nothing left to send
+                        Ok(0)
                     }
                 })
-                .await
-                .map_err(Error::Io)?;
+                .await;
 
-            bytes_sent += sent;
+            match result {
+                Ok(sent) => {
+                    // Update bytes sent (but only count actual data bytes, not padding)
+                    if !remaining_data.is_empty() {
+                        bytes_sent += sent;
+                    }
 
-            // Mark FDs as sent after first successful sendmsg
-            if !fds_sent && !fds.is_empty() {
-                fds_sent = true;
-                trace!("Sent {} FDs with first chunk ({} bytes)", fds.len(), sent);
+                    // Update FDs sent
+                    if !fds_batch.is_empty() {
+                        fds_sent += fds_batch.len();
+                        trace!(
+                            "Sent {} FDs (total: {}/{}) with {} bytes",
+                            fds_batch.len(),
+                            fds_sent,
+                            fds.len(),
+                            sent
+                        );
+                    }
+
+                    trace!(
+                        "Progress: {}/{} bytes, {}/{} FDs",
+                        bytes_sent,
+                        data.len(),
+                        fds_sent,
+                        fds.len()
+                    );
+                }
+                Err(e) if e.kind() == io::ErrorKind::InvalidInput && fds_batch.len() > 1 => {
+                    // EINVAL with multiple FDs likely means we exceeded the kernel's
+                    // SCM_MAX_FD limit. Reduce batch size and retry.
+                    let new_max = fds_batch.len() / 2;
+                    debug!(
+                        "sendmsg returned EINVAL with {} FDs, reducing batch size to {}",
+                        fds_batch.len(),
+                        new_max
+                    );
+                    current_max_fds = new_max;
+                    // Don't update bytes_sent or fds_sent - we'll retry this batch
+                    continue;
+                }
+                Err(e) => return Err(Error::Io(e)),
             }
+        }
 
-            trace!(
-                "Sent {}/{} bytes (this chunk: {})",
-                bytes_sent,
-                data.len(),
-                sent
+        // If we discovered a lower limit, remember it for future sends
+        if current_max_fds < self.max_fds_per_sendmsg.get() {
+            debug!(
+                "Learned kernel FD limit: reducing max_fds_per_sendmsg from {} to {}",
+                self.max_fds_per_sendmsg, current_max_fds
             );
+            // current_max_fds is at least 1 (we only reduce when fds_this_batch > 1)
+            self.max_fds_per_sendmsg =
+                NonZeroUsize::new(current_max_fds).expect("current_max_fds should be >= 1");
         }
 
         Ok(())
@@ -217,7 +295,7 @@ impl Receiver {
 
                 let mut iov = [IoSliceMut::new(&mut data_buffer)];
                 let mut cmsg_space: Vec<u8> =
-                    vec![0u8; rustix::cmsg_space!(ScmRights(MAX_FDS_PER_MESSAGE))];
+                    vec![0u8; rustix::cmsg_space!(ScmRights(MAX_FDS_PER_RECVMSG))];
                 let mut cmsg_buffer = RecvAncillaryBuffer::new(cmsg_space.as_mut_slice());
 
                 let result = rustix::net::recvmsg(

@@ -111,4 +111,4 @@ pub use message::{
     MessageWithFds, FILE_DESCRIPTOR_ERROR_CODE,
 };
 pub use server::Server;
-pub use transport::{Receiver, Sender, UnixSocketTransport};
+pub use transport::{Receiver, Sender, UnixSocketTransport, DEFAULT_MAX_FDS_PER_SENDMSG};
