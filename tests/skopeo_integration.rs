@@ -87,7 +87,7 @@ async fn test_skopeo_jsonrpc_initialize() -> jsonrpc_fdpass::Result<()> {
     let stream = tokio::net::UnixStream::from_std(std_stream)?;
 
     // Create transport
-    let transport = UnixSocketTransport::new(stream)?;
+    let transport = UnixSocketTransport::new(stream);
     let (mut sender, mut receiver) = transport.split();
 
     // Send Initialize request (skopeo expects an empty array for params)
@@ -206,7 +206,7 @@ async fn test_skopeo_jsonrpc_error_handling() -> jsonrpc_fdpass::Result<()> {
     std_stream.set_nonblocking(true)?;
     let stream = tokio::net::UnixStream::from_std(std_stream)?;
 
-    let transport = UnixSocketTransport::new(stream)?;
+    let transport = UnixSocketTransport::new(stream);
     let (mut sender, mut receiver) = transport.split();
 
     // First, Initialize

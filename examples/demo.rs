@@ -63,7 +63,7 @@ async fn run_server(listener: UnixListener) -> Result<()> {
 
     // Accept one connection and handle it
     if let Ok((stream, _)) = listener.accept().await {
-        let transport = jsonrpc_fdpass::UnixSocketTransport::new(stream)?;
+        let transport = jsonrpc_fdpass::UnixSocketTransport::new(stream);
         let (mut sender, mut receiver) = transport.split();
 
         // Handle messages from this connection

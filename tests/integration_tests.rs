@@ -72,7 +72,7 @@ async fn test_client_server_communication() -> Result<()> {
         server.register_method("echo", |_method, params, _fds| Ok((params, Vec::new())));
 
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream).unwrap();
+            let transport = UnixSocketTransport::new(stream);
             let (mut sender, mut receiver) = transport.split();
 
             if let Ok(message_with_fds) = receiver.receive().await {
@@ -85,7 +85,7 @@ async fn test_client_server_communication() -> Result<()> {
 
     // Connect and send request (no race condition)
     let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
-    let transport = UnixSocketTransport::new(stream).unwrap();
+    let transport = UnixSocketTransport::new(stream);
     let (mut sender, _receiver) = transport.split();
 
     let request = JsonRpcRequest::new(
@@ -151,7 +151,7 @@ async fn test_file_descriptor_passing() -> Result<()> {
         });
 
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream).unwrap();
+            let transport = UnixSocketTransport::new(stream);
             let (mut sender, mut receiver) = transport.split();
 
             if let Ok(message_with_fds) = receiver.receive().await {
@@ -164,7 +164,7 @@ async fn test_file_descriptor_passing() -> Result<()> {
 
     // Connect and send file descriptor (no race condition)
     let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
-    let transport = UnixSocketTransport::new(stream).unwrap();
+    let transport = UnixSocketTransport::new(stream);
     let (mut sender, _receiver) = transport.split();
 
     let params = serde_json::json!({
@@ -246,7 +246,7 @@ async fn test_multiple_messages_with_fds_sequential() -> Result<()> {
         });
 
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream).unwrap();
+            let transport = UnixSocketTransport::new(stream);
             let (mut sender, mut receiver) = transport.split();
 
             // Process multiple messages sequentially
@@ -262,7 +262,7 @@ async fn test_multiple_messages_with_fds_sequential() -> Result<()> {
 
     // Connect and send multiple messages with file descriptors
     let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
-    let transport = UnixSocketTransport::new(stream).unwrap();
+    let transport = UnixSocketTransport::new(stream);
     let (mut sender, _receiver) = transport.split();
 
     // Send multiple messages sequentially
@@ -338,7 +338,7 @@ async fn test_multiple_fds_single_message() -> Result<()> {
         });
 
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream).unwrap();
+            let transport = UnixSocketTransport::new(stream);
             let (mut sender, mut receiver) = transport.split();
 
             if let Ok(message_with_fds) = receiver.receive().await {
@@ -351,7 +351,7 @@ async fn test_multiple_fds_single_message() -> Result<()> {
 
     // Connect and send message with multiple file descriptors
     let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
-    let transport = UnixSocketTransport::new(stream).unwrap();
+    let transport = UnixSocketTransport::new(stream);
     let (mut sender, _receiver) = transport.split();
 
     let params = serde_json::json!({
@@ -419,7 +419,7 @@ async fn test_mixed_messages_with_and_without_fds() -> Result<()> {
         });
 
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream).unwrap();
+            let transport = UnixSocketTransport::new(stream);
             let (mut sender, mut receiver) = transport.split();
 
             // Process multiple mixed messages
@@ -438,7 +438,7 @@ async fn test_mixed_messages_with_and_without_fds() -> Result<()> {
 
     // Connect and send mixed messages
     let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
-    let transport = UnixSocketTransport::new(stream).unwrap();
+    let transport = UnixSocketTransport::new(stream);
     let (mut sender, _receiver) = transport.split();
 
     // 1. Echo message (no FD)
@@ -540,7 +540,7 @@ async fn test_large_number_of_fds() -> Result<()> {
         });
 
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream).unwrap();
+            let transport = UnixSocketTransport::new(stream);
             let (mut sender, mut receiver) = transport.split();
 
             if let Ok(message_with_fds) = receiver.receive().await {
@@ -553,7 +553,7 @@ async fn test_large_number_of_fds() -> Result<()> {
 
     // Connect and send message with many file descriptors
     let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
-    let transport = UnixSocketTransport::new(stream).unwrap();
+    let transport = UnixSocketTransport::new(stream);
     let (mut sender, _receiver) = transport.split();
 
     let params = serde_json::json!({
@@ -620,7 +620,7 @@ async fn test_zero_byte_files_with_fds() -> Result<()> {
         });
 
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream).unwrap();
+            let transport = UnixSocketTransport::new(stream);
             let (mut sender, mut receiver) = transport.split();
 
             if let Ok(message_with_fds) = receiver.receive().await {
@@ -633,7 +633,7 @@ async fn test_zero_byte_files_with_fds() -> Result<()> {
 
     // Connect and send message with empty file descriptors
     let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
-    let transport = UnixSocketTransport::new(stream).unwrap();
+    let transport = UnixSocketTransport::new(stream);
     let (mut sender, _receiver) = transport.split();
 
     let params = serde_json::json!({
@@ -711,7 +711,7 @@ async fn test_fd_placeholder_index_ordering() -> Result<()> {
         });
 
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream).unwrap();
+            let transport = UnixSocketTransport::new(stream);
             let (mut sender, mut receiver) = transport.split();
 
             if let Ok(message_with_fds) = receiver.receive().await {
@@ -724,7 +724,7 @@ async fn test_fd_placeholder_index_ordering() -> Result<()> {
 
     // Connect and send message with FDs in specific order
     let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
-    let transport = UnixSocketTransport::new(stream).unwrap();
+    let transport = UnixSocketTransport::new(stream);
     let (mut sender, _receiver) = transport.split();
 
     let params = serde_json::json!({
@@ -792,7 +792,7 @@ async fn test_rapid_message_bursts() -> Result<()> {
         });
 
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream).unwrap();
+            let transport = UnixSocketTransport::new(stream);
             let (mut sender, mut receiver) = transport.split();
 
             // Process burst of messages
@@ -808,7 +808,7 @@ async fn test_rapid_message_bursts() -> Result<()> {
 
     // Connect and send burst of messages
     let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
-    let transport = UnixSocketTransport::new(stream).unwrap();
+    let transport = UnixSocketTransport::new(stream);
     let (mut sender, _receiver) = transport.split();
 
     // Send 20 messages in rapid succession, some with FDs, some without
@@ -909,7 +909,7 @@ async fn test_interleaved_requests_responses_notifications() -> Result<()> {
         });
 
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream).unwrap();
+            let transport = UnixSocketTransport::new(stream);
             let (mut sender, mut receiver) = transport.split();
 
             // Process interleaved messages
@@ -925,7 +925,7 @@ async fn test_interleaved_requests_responses_notifications() -> Result<()> {
 
     // Connect and send interleaved messages
     let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
-    let transport = UnixSocketTransport::new(stream).unwrap();
+    let transport = UnixSocketTransport::new(stream);
     let (mut sender, _receiver) = transport.split();
 
     // 1. Request with FD
@@ -1030,7 +1030,7 @@ async fn test_invalid_json_framing_error() -> Result<()> {
 
     let server_handle = tokio::spawn(async move {
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream).unwrap();
+            let transport = UnixSocketTransport::new(stream);
             let (_sender, mut receiver) = transport.split();
 
             // Expect error when receiving invalid JSON
@@ -1084,7 +1084,7 @@ async fn test_mismatched_fd_count_error() -> Result<()> {
         });
 
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream).unwrap();
+            let transport = UnixSocketTransport::new(stream);
             let (mut sender, mut receiver) = transport.split();
 
             // Expect error when processing message with FD count mismatch
@@ -1144,7 +1144,7 @@ async fn test_fds_field_mismatch_too_few_fds() -> Result<()> {
 
     let server_handle = tokio::spawn(async move {
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream).unwrap();
+            let transport = UnixSocketTransport::new(stream);
             let (_sender, mut receiver) = transport.split();
 
             // Expect error when processing message with fds field mismatch
@@ -1203,7 +1203,7 @@ async fn test_fds_field_zero_with_no_fds() -> Result<()> {
         });
 
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream).unwrap();
+            let transport = UnixSocketTransport::new(stream);
             let (mut sender, mut receiver) = transport.split();
 
             if let Ok(message_with_fds) = receiver.receive().await {
@@ -1215,7 +1215,7 @@ async fn test_fds_field_zero_with_no_fds() -> Result<()> {
     });
 
     let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
-    let transport = UnixSocketTransport::new(stream).unwrap();
+    let transport = UnixSocketTransport::new(stream);
     let (mut sender, _receiver) = transport.split();
 
     let params = serde_json::json!({ "data": "test" });
@@ -1261,7 +1261,7 @@ async fn test_fds_with_positional_semantics() -> Result<()> {
         });
 
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream).unwrap();
+            let transport = UnixSocketTransport::new(stream);
             let (mut sender, mut receiver) = transport.split();
 
             if let Ok(message_with_fds) = receiver.receive().await {
@@ -1273,7 +1273,7 @@ async fn test_fds_with_positional_semantics() -> Result<()> {
     });
 
     let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
-    let transport = UnixSocketTransport::new(stream).unwrap();
+    let transport = UnixSocketTransport::new(stream);
     let (mut sender, _receiver) = transport.split();
 
     let params = serde_json::json!({
@@ -1314,7 +1314,7 @@ async fn test_connection_drop_with_pending_fds() -> Result<()> {
 
     let server_handle = tokio::spawn(async move {
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream).unwrap();
+            let transport = UnixSocketTransport::new(stream);
             let (_sender, mut receiver) = transport.split();
 
             // Try to receive but client will drop connection
@@ -1334,7 +1334,7 @@ async fn test_connection_drop_with_pending_fds() -> Result<()> {
     // Connect and then immediately drop connection
     {
         let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
-        let transport = UnixSocketTransport::new(stream).unwrap();
+        let transport = UnixSocketTransport::new(stream);
         let (mut sender, _receiver) = transport.split();
 
         let params = serde_json::json!({
@@ -1408,7 +1408,7 @@ async fn test_large_message_with_fds() -> Result<()> {
         });
 
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream).unwrap();
+            let transport = UnixSocketTransport::new(stream);
             let (mut sender, mut receiver) = transport.split();
 
             if let Ok(message_with_fds) = receiver.receive().await {
@@ -1421,7 +1421,7 @@ async fn test_large_message_with_fds() -> Result<()> {
 
     // Connect and send large message with FD
     let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
-    let transport = UnixSocketTransport::new(stream).unwrap();
+    let transport = UnixSocketTransport::new(stream);
     let (mut sender, _receiver) = transport.split();
 
     let large_data = "Y".repeat(50000); // Large JSON parameter
@@ -1466,7 +1466,7 @@ async fn test_invalid_fds_field_type() -> Result<()> {
         });
 
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream).unwrap();
+            let transport = UnixSocketTransport::new(stream);
             let (mut sender, mut receiver) = transport.split();
 
             if let Ok(message_with_fds) = receiver.receive().await {
@@ -1514,7 +1514,7 @@ async fn test_pretty_printed_json() -> Result<()> {
         server.register_method("echo", |_method, params, _fds| Ok((params, Vec::new())));
 
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream).unwrap();
+            let transport = UnixSocketTransport::new(stream);
             let (mut sender, mut receiver) = transport.split();
 
             // Process multiple pretty-printed messages
@@ -1585,7 +1585,7 @@ async fn test_concatenated_compact_json() -> Result<()> {
         });
 
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream).unwrap();
+            let transport = UnixSocketTransport::new(stream);
             let (mut sender, mut receiver) = transport.split();
 
             // Process 3 messages
@@ -1653,7 +1653,7 @@ async fn test_mixed_pretty_and_compact_json() -> Result<()> {
         server.register_method("echo", |_method, params, _fds| Ok((params, Vec::new())));
 
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream).unwrap();
+            let transport = UnixSocketTransport::new(stream);
             let (mut sender, mut receiver) = transport.split();
 
             // Process 4 messages with mixed formatting
@@ -1710,7 +1710,7 @@ async fn test_sender_pretty_mode() -> Result<()> {
         server.register_method("echo", |_method, params, _fds| Ok((params, Vec::new())));
 
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream).unwrap();
+            let transport = UnixSocketTransport::new(stream);
             let (mut sender, mut receiver) = transport.split();
 
             // Process messages sent with pretty mode enabled
@@ -1725,7 +1725,7 @@ async fn test_sender_pretty_mode() -> Result<()> {
     });
 
     let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
-    let transport = UnixSocketTransport::new(stream).unwrap();
+    let transport = UnixSocketTransport::new(stream);
     let (mut sender, _receiver) = transport.split();
 
     // Enable pretty printing via the official API
@@ -1766,7 +1766,7 @@ async fn test_large_message_exceeds_kernel_buffer() -> Result<()> {
 
     let expected_data = large_data.clone();
     let server_handle = tokio::spawn(async move {
-        let transport = UnixSocketTransport::new(server_stream).unwrap();
+        let transport = UnixSocketTransport::new(server_stream);
         let (_sender, mut receiver) = transport.split();
 
         let message_with_fds = receiver.receive().await?;
@@ -1791,7 +1791,7 @@ async fn test_large_message_exceeds_kernel_buffer() -> Result<()> {
         Ok::<(), jsonrpc_fdpass::Error>(())
     });
 
-    let transport = UnixSocketTransport::new(client_stream).unwrap();
+    let transport = UnixSocketTransport::new(client_stream);
     let (mut sender, _receiver) = transport.split();
 
     let request = JsonRpcRequest::new(
@@ -1832,7 +1832,7 @@ async fn test_large_message_with_fd() -> Result<()> {
 
     let expected_data = large_data.clone();
     let server_handle = tokio::spawn(async move {
-        let transport = UnixSocketTransport::new(server_stream).unwrap();
+        let transport = UnixSocketTransport::new(server_stream);
         let (_sender, mut receiver) = transport.split();
 
         let message_with_fds = receiver.receive().await?;
@@ -1866,7 +1866,7 @@ async fn test_large_message_with_fd() -> Result<()> {
         Ok::<(), jsonrpc_fdpass::Error>(())
     });
 
-    let transport = UnixSocketTransport::new(client_stream).unwrap();
+    let transport = UnixSocketTransport::new(client_stream);
     let (mut sender, _receiver) = transport.split();
 
     let request = JsonRpcRequest::new(
@@ -1936,7 +1936,7 @@ async fn test_fd_batching_one_per_message() -> Result<()> {
         });
 
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream).unwrap();
+            let transport = UnixSocketTransport::new(stream);
             let (mut sender, mut receiver) = transport.split();
 
             if let Ok(message_with_fds) = receiver.receive().await {
@@ -1948,7 +1948,7 @@ async fn test_fd_batching_one_per_message() -> Result<()> {
     });
 
     let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
-    let transport = UnixSocketTransport::new(stream).unwrap();
+    let transport = UnixSocketTransport::new(stream);
     let (mut sender, _receiver) = transport.split();
 
     // Set max FDs per sendmsg to 1, forcing maximum batching
@@ -2011,7 +2011,7 @@ async fn test_fd_batching_two_per_message() -> Result<()> {
         });
 
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream).unwrap();
+            let transport = UnixSocketTransport::new(stream);
             let (mut sender, mut receiver) = transport.split();
 
             if let Ok(message_with_fds) = receiver.receive().await {
@@ -2023,7 +2023,7 @@ async fn test_fd_batching_two_per_message() -> Result<()> {
     });
 
     let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
-    let transport = UnixSocketTransport::new(stream).unwrap();
+    let transport = UnixSocketTransport::new(stream);
     let (mut sender, _receiver) = transport.split();
 
     // Set max FDs per sendmsg to 2
@@ -2075,7 +2075,7 @@ async fn test_fd_batching_interleaved_with_no_fd_messages() -> Result<()> {
         });
 
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream).unwrap();
+            let transport = UnixSocketTransport::new(stream);
             let (mut sender, mut receiver) = transport.split();
 
             // Process 5 messages: FDs, no FDs, FDs, no FDs, FDs
@@ -2090,7 +2090,7 @@ async fn test_fd_batching_interleaved_with_no_fd_messages() -> Result<()> {
     });
 
     let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
-    let transport = UnixSocketTransport::new(stream).unwrap();
+    let transport = UnixSocketTransport::new(stream);
     let (mut sender, _receiver) = transport.split();
 
     // Very aggressive batching
@@ -2212,7 +2212,7 @@ async fn test_fd_batching_many_fds_small_batches() -> Result<()> {
         });
 
         if let Ok((stream, _)) = listener.accept().await {
-            let transport = UnixSocketTransport::new(stream).unwrap();
+            let transport = UnixSocketTransport::new(stream);
             let (mut sender, mut receiver) = transport.split();
 
             if let Ok(message_with_fds) = receiver.receive().await {
@@ -2224,7 +2224,7 @@ async fn test_fd_batching_many_fds_small_batches() -> Result<()> {
     });
 
     let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
-    let transport = UnixSocketTransport::new(stream).unwrap();
+    let transport = UnixSocketTransport::new(stream);
     let (mut sender, _receiver) = transport.split();
 
     // Very small batch size: 20 FDs with batch size 3 = 7 batches

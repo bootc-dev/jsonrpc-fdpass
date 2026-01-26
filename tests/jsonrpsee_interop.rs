@@ -23,7 +23,7 @@ async fn test_wire_format_round_trip() -> Result<()> {
         let mut server = jsonrpc_fdpass::Server::new();
         server.register_method("echo", |_method, params, _fds| Ok((params, Vec::new())));
 
-        let transport = UnixSocketTransport::new(server_stream).unwrap();
+        let transport = UnixSocketTransport::new(server_stream);
         let (mut sender, mut receiver) = transport.split();
 
         // Handle one request
@@ -35,7 +35,7 @@ async fn test_wire_format_round_trip() -> Result<()> {
     });
 
     // Use our client transport
-    let transport = UnixSocketTransport::new(client_stream).unwrap();
+    let transport = UnixSocketTransport::new(client_stream);
     let (mut sender, mut receiver) = transport.split();
 
     let params = serde_json::json!({
@@ -85,7 +85,7 @@ async fn test_notification_no_response() -> Result<()> {
             Ok(())
         });
 
-        let transport = UnixSocketTransport::new(server_stream).unwrap();
+        let transport = UnixSocketTransport::new(server_stream);
         let (mut sender, mut receiver) = transport.split();
 
         // Handle one notification
@@ -100,7 +100,7 @@ async fn test_notification_no_response() -> Result<()> {
     });
 
     // Send notification (no id)
-    let transport = UnixSocketTransport::new(client_stream).unwrap();
+    let transport = UnixSocketTransport::new(client_stream);
     let (mut sender, _receiver) = transport.split();
 
     let notification = JsonRpcNotification::new(
@@ -131,7 +131,7 @@ async fn test_error_response_format() -> Result<()> {
         let server = jsonrpc_fdpass::Server::new();
         // Don't register "unknown_method" - it should return method not found
 
-        let transport = UnixSocketTransport::new(server_stream).unwrap();
+        let transport = UnixSocketTransport::new(server_stream);
         let (mut sender, mut receiver) = transport.split();
 
         if let Ok(msg) = receiver.receive().await {
@@ -141,7 +141,7 @@ async fn test_error_response_format() -> Result<()> {
         Ok::<(), jsonrpc_fdpass::Error>(())
     });
 
-    let transport = UnixSocketTransport::new(client_stream).unwrap();
+    let transport = UnixSocketTransport::new(client_stream);
     let (mut sender, mut receiver) = transport.split();
 
     let request = JsonRpcRequest::new("unknown_method".to_string(), None, Value::Number(1.into()));
@@ -184,7 +184,7 @@ async fn test_sequential_requests() -> Result<()> {
             Ok((Some(Value::Number((a + b).into())), Vec::new()))
         });
 
-        let transport = UnixSocketTransport::new(server_stream).unwrap();
+        let transport = UnixSocketTransport::new(server_stream);
         let (mut sender, mut receiver) = transport.split();
 
         // Handle multiple requests
@@ -197,7 +197,7 @@ async fn test_sequential_requests() -> Result<()> {
         Ok::<(), jsonrpc_fdpass::Error>(())
     });
 
-    let transport = UnixSocketTransport::new(client_stream).unwrap();
+    let transport = UnixSocketTransport::new(client_stream);
     let (mut sender, mut receiver) = transport.split();
 
     // Send 3 requests and verify responses
@@ -241,7 +241,7 @@ async fn test_parse_jsonrpsee_format_request() -> Result<()> {
         let mut server = jsonrpc_fdpass::Server::new();
         server.register_method("test", |_method, params, _fds| Ok((params, Vec::new())));
 
-        let transport = UnixSocketTransport::new(server_stream).unwrap();
+        let transport = UnixSocketTransport::new(server_stream);
         let (mut sender, mut receiver) = transport.split();
 
         if let Ok(msg) = receiver.receive().await {
@@ -341,7 +341,7 @@ async fn test_string_id_handling() -> Result<()> {
         let mut server = jsonrpc_fdpass::Server::new();
         server.register_method("echo", |_method, params, _fds| Ok((params, Vec::new())));
 
-        let transport = UnixSocketTransport::new(server_stream).unwrap();
+        let transport = UnixSocketTransport::new(server_stream);
         let (mut sender, mut receiver) = transport.split();
 
         if let Ok(msg) = receiver.receive().await {
@@ -351,7 +351,7 @@ async fn test_string_id_handling() -> Result<()> {
         Ok::<(), jsonrpc_fdpass::Error>(())
     });
 
-    let transport = UnixSocketTransport::new(client_stream).unwrap();
+    let transport = UnixSocketTransport::new(client_stream);
     let (mut sender, mut receiver) = transport.split();
 
     // Use string ID
@@ -391,7 +391,7 @@ async fn test_null_params() -> Result<()> {
             Ok((Some(Value::Bool(params.is_none())), Vec::new()))
         });
 
-        let transport = UnixSocketTransport::new(server_stream).unwrap();
+        let transport = UnixSocketTransport::new(server_stream);
         let (mut sender, mut receiver) = transport.split();
 
         if let Ok(msg) = receiver.receive().await {
@@ -401,7 +401,7 @@ async fn test_null_params() -> Result<()> {
         Ok::<(), jsonrpc_fdpass::Error>(())
     });
 
-    let transport = UnixSocketTransport::new(client_stream).unwrap();
+    let transport = UnixSocketTransport::new(client_stream);
     let (mut sender, mut receiver) = transport.split();
 
     // Send request with no params
@@ -443,7 +443,7 @@ async fn test_array_params() -> Result<()> {
             Ok((Some(Value::Number(sum.into())), Vec::new()))
         });
 
-        let transport = UnixSocketTransport::new(server_stream).unwrap();
+        let transport = UnixSocketTransport::new(server_stream);
         let (mut sender, mut receiver) = transport.split();
 
         if let Ok(msg) = receiver.receive().await {
@@ -453,7 +453,7 @@ async fn test_array_params() -> Result<()> {
         Ok::<(), jsonrpc_fdpass::Error>(())
     });
 
-    let transport = UnixSocketTransport::new(client_stream).unwrap();
+    let transport = UnixSocketTransport::new(client_stream);
     let (mut sender, mut receiver) = transport.split();
 
     // Send request with array params (positional)
