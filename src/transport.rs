@@ -1,11 +1,11 @@
 use crate::error::{Error, Result};
 use crate::message::{get_fd_count, JsonRpcMessage, JsonRpcNotification, MessageWithFds};
 use rustix::fd::AsFd;
-use serde::Serialize;
 use rustix::net::{
     RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags, SendAncillaryBuffer,
     SendAncillaryMessage, SendFlags,
 };
+use serde::Serialize;
 use std::collections::VecDeque;
 use std::io::{self, IoSlice, IoSliceMut};
 use std::num::NonZeroUsize;
@@ -148,7 +148,9 @@ impl Sender {
             let remaining_fds = &fds[fds_sent..];
 
             // Determine how many FDs to send in this batch (up to current_max_fds)
-            let fds_batch = remaining_fds.get(..current_max_fds).unwrap_or(remaining_fds);
+            let fds_batch = remaining_fds
+                .get(..current_max_fds)
+                .unwrap_or(remaining_fds);
 
             let result = self
                 .stream

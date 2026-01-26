@@ -20,7 +20,7 @@ pub fn get_fd_count(value: &serde_json::Value) -> usize {
 
 /// Helper to skip serializing fds field when it's None or 0
 fn skip_if_zero_or_none(fds: &Option<usize>) -> bool {
-    fds.map_or(true, |n| n == 0)
+    fds.is_none_or(|n| n == 0)
 }
 
 /// A JSON-RPC 2.0 request message.
