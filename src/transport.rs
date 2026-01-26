@@ -29,15 +29,18 @@ const MAX_FDS_PER_RECVMSG: usize = 512;
 /// Read buffer size for incoming data.
 const READ_BUFFER_SIZE: usize = 4096;
 
+/// Transport layer for Unix socket communication with file descriptor passing.
 pub struct UnixSocketTransport {
     stream: TokioUnixStream,
 }
 
 impl UnixSocketTransport {
+    /// Create a new transport from an existing Unix stream.
     pub fn new(stream: TokioUnixStream) -> Self {
         Self { stream }
     }
 
+    /// Split the transport into separate sender and receiver halves.
     pub fn split(self) -> (Sender, Receiver) {
         let stream = Arc::new(self.stream);
 
@@ -56,6 +59,7 @@ impl UnixSocketTransport {
     }
 }
 
+/// Sender half of a Unix socket transport for sending JSON-RPC messages.
 pub struct Sender {
     stream: Arc<TokioUnixStream>,
     pretty: bool,
@@ -113,6 +117,7 @@ impl Sender {
         self.send(message_with_fds).await
     }
 
+    /// Send a JSON-RPC message with optional file descriptors.
     pub async fn send(&mut self, message_with_fds: MessageWithFds) -> Result<()> {
         let serialized = if self.pretty {
             message_with_fds.serialize_pretty()?
@@ -247,6 +252,7 @@ impl Sender {
     }
 }
 
+/// Receiver half of a Unix socket transport for receiving JSON-RPC messages.
 pub struct Receiver {
     stream: Arc<TokioUnixStream>,
     buffer: Vec<u8>,

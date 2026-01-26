@@ -23,51 +23,69 @@ fn skip_if_zero_or_none(fds: &Option<usize>) -> bool {
     fds.map_or(true, |n| n == 0)
 }
 
-// Define our own message types that don't have lifetime constraints
+/// A JSON-RPC 2.0 request message.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JsonRpcRequest {
+    /// The JSON-RPC protocol version (always "2.0").
     pub jsonrpc: String,
+    /// The name of the method to invoke.
     pub method: String,
+    /// Optional parameters for the method.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub params: Option<serde_json::Value>,
+    /// The request identifier.
     pub id: serde_json::Value,
-    /// Number of file descriptors attached to this message
+    /// Number of file descriptors attached to this message.
     #[serde(skip_serializing_if = "skip_if_zero_or_none")]
     pub fds: Option<usize>,
 }
 
+/// A JSON-RPC 2.0 response message.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JsonRpcResponse {
+    /// The JSON-RPC protocol version (always "2.0").
     pub jsonrpc: String,
+    /// The result of the method invocation (present on success).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<serde_json::Value>,
+    /// The error object (present on failure).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<JsonRpcError<'static>>,
+    /// The request identifier this response corresponds to.
     pub id: serde_json::Value,
-    /// Number of file descriptors attached to this message
+    /// Number of file descriptors attached to this message.
     #[serde(skip_serializing_if = "skip_if_zero_or_none")]
     pub fds: Option<usize>,
 }
 
+/// A JSON-RPC 2.0 notification message (a request without an id).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JsonRpcNotification {
+    /// The JSON-RPC protocol version (always "2.0").
     pub jsonrpc: String,
+    /// The name of the method to invoke.
     pub method: String,
+    /// Optional parameters for the method.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub params: Option<serde_json::Value>,
-    /// Number of file descriptors attached to this message
+    /// Number of file descriptors attached to this message.
     #[serde(skip_serializing_if = "skip_if_zero_or_none")]
     pub fds: Option<usize>,
 }
 
+/// A JSON-RPC 2.0 message (request, response, or notification).
 #[derive(Debug, Clone)]
 pub enum JsonRpcMessage {
+    /// A request message expecting a response.
     Request(JsonRpcRequest),
+    /// A response to a previous request.
     Response(JsonRpcResponse),
+    /// A notification (no response expected).
     Notification(JsonRpcNotification),
 }
 
 impl JsonRpcRequest {
+    /// Create a new JSON-RPC request.
     pub fn new(method: String, params: Option<serde_json::Value>, id: serde_json::Value) -> Self {
         Self {
             jsonrpc: JSONRPC_VERSION.to_string(),
@@ -80,6 +98,7 @@ impl JsonRpcRequest {
 }
 
 impl JsonRpcResponse {
+    /// Create a successful JSON-RPC response.
     pub fn success(result: serde_json::Value, id: serde_json::Value) -> Self {
         Self {
             jsonrpc: JSONRPC_VERSION.to_string(),
@@ -90,6 +109,7 @@ impl JsonRpcResponse {
         }
     }
 
+    /// Create an error JSON-RPC response.
     pub fn error(error: JsonRpcError<'static>, id: serde_json::Value) -> Self {
         Self {
             jsonrpc: JSONRPC_VERSION.to_string(),
@@ -102,6 +122,7 @@ impl JsonRpcResponse {
 }
 
 impl JsonRpcNotification {
+    /// Create a new JSON-RPC notification.
     pub fn new(method: String, params: Option<serde_json::Value>) -> Self {
         Self {
             jsonrpc: JSONRPC_VERSION.to_string(),
@@ -113,6 +134,7 @@ impl JsonRpcNotification {
 }
 
 impl JsonRpcMessage {
+    /// Convert this message to a JSON value.
     pub fn to_json_value(&self) -> Result<serde_json::Value> {
         match self {
             JsonRpcMessage::Request(req) => Ok(serde_json::to_value(req)?),
@@ -121,6 +143,7 @@ impl JsonRpcMessage {
         }
     }
 
+    /// Parse a JSON-RPC message from a JSON value.
     pub fn from_json_value(value: serde_json::Value) -> Result<Self> {
         if let serde_json::Value::Object(obj) = &value {
             if obj.contains_key("method") && obj.contains_key("id") {
@@ -141,9 +164,12 @@ impl JsonRpcMessage {
     }
 }
 
+/// A JSON-RPC message paired with file descriptors to send or that were received.
 #[derive(Debug)]
 pub struct MessageWithFds {
+    /// The JSON-RPC message.
     pub message: JsonRpcMessage,
+    /// File descriptors attached to this message.
     pub file_descriptors: Vec<OwnedFd>,
 }
 
@@ -169,6 +195,7 @@ impl JsonRpcMessage {
 }
 
 impl MessageWithFds {
+    /// Create a new message with file descriptors.
     pub fn new(message: JsonRpcMessage, file_descriptors: Vec<OwnedFd>) -> Self {
         Self {
             message,
@@ -218,8 +245,10 @@ impl MessageWithFds {
     }
 }
 
+/// JSON-RPC error code for file descriptor errors.
 pub const FILE_DESCRIPTOR_ERROR_CODE: i32 = -32050;
 
+/// Create a JSON-RPC error object for file descriptor errors.
 pub fn file_descriptor_error() -> JsonRpcError<'static> {
     JsonRpcError::owned(
         FILE_DESCRIPTOR_ERROR_CODE,

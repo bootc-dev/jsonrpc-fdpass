@@ -1,11 +1,14 @@
-use jsonrpc_fdpass::{Client, Result, Server};
+use jsonrpc_fdpass::{
+    JsonRpcMessage, JsonRpcNotification, JsonRpcRequest, MessageWithFds, Result, Server,
+    UnixSocketTransport,
+};
 use serde_json::Value;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::os::unix::io::OwnedFd;
 use std::path::PathBuf;
 use tempfile::TempDir;
-use tokio::net::UnixListener;
+use tokio::net::{UnixListener, UnixStream};
 use tracing::info;
 
 #[tokio::main]
@@ -63,7 +66,7 @@ async fn run_server(listener: UnixListener) -> Result<()> {
 
     // Accept one connection and handle it
     if let Ok((stream, _)) = listener.accept().await {
-        let transport = jsonrpc_fdpass::UnixSocketTransport::new(stream);
+        let transport = UnixSocketTransport::new(stream);
         let (mut sender, mut receiver) = transport.split();
 
         // Handle messages from this connection
@@ -82,7 +85,9 @@ async fn run_server(listener: UnixListener) -> Result<()> {
 }
 
 async fn run_client(socket_path: PathBuf) -> Result<()> {
-    let mut client = Client::connect(&socket_path).await?;
+    let stream = UnixStream::connect(&socket_path).await?;
+    let transport = UnixSocketTransport::new(stream);
+    let (mut sender, mut _receiver) = transport.split();
 
     // Create a temporary file to send to the server
     let mut temp_file = tempfile::NamedTempFile::new().map_err(jsonrpc_fdpass::Error::Io)?;
@@ -97,9 +102,9 @@ async fn run_client(socket_path: PathBuf) -> Result<()> {
     });
 
     info!("Client sending file descriptor to server");
-    client
-        .call_method("read_file", Some(params), vec![fd])
-        .await?;
+    let request = JsonRpcRequest::new("read_file".to_string(), Some(params), serde_json::json!(1));
+    let message = MessageWithFds::new(JsonRpcMessage::Request(request), vec![fd]);
+    sender.send(message).await?;
 
     // Send notification
     let params = serde_json::json!({
@@ -107,9 +112,9 @@ async fn run_client(socket_path: PathBuf) -> Result<()> {
     });
 
     info!("Client sending notification");
-    client
-        .send_notification("log_message", Some(params), vec![])
-        .await?;
+    let notification = JsonRpcNotification::new("log_message".to_string(), Some(params));
+    let message = MessageWithFds::new(JsonRpcMessage::Notification(notification), vec![]);
+    sender.send(message).await?;
 
     info!("Client finished");
     Ok(())

@@ -10,20 +10,30 @@ use std::sync::Arc;
 use tokio::net::{UnixListener, UnixStream};
 use tracing::{debug, error, info};
 
+/// Handler function for JSON-RPC methods.
+///
+/// Takes the method name, optional parameters, and received file descriptors.
+/// Returns the result value and any file descriptors to send with the response.
 pub type MethodHandler = Box<
     dyn Fn(&str, Option<Value>, Vec<OwnedFd>) -> Result<(Option<Value>, Vec<OwnedFd>)>
         + Send
         + Sync,
 >;
+
+/// Handler function for JSON-RPC notifications.
+///
+/// Takes the method name, optional parameters, and received file descriptors.
 pub type NotificationHandler =
     Box<dyn Fn(&str, Option<Value>, Vec<OwnedFd>) -> Result<()> + Send + Sync>;
 
+/// A JSON-RPC 2.0 server with file descriptor passing support.
 pub struct Server {
     methods: HashMap<String, MethodHandler>,
     notifications: HashMap<String, NotificationHandler>,
 }
 
 impl Server {
+    /// Create a new JSON-RPC server.
     pub fn new() -> Self {
         Self {
             methods: HashMap::new(),
@@ -31,6 +41,7 @@ impl Server {
         }
     }
 
+    /// Register a handler for a JSON-RPC method.
     pub fn register_method<F>(&mut self, name: &str, handler: F)
     where
         F: Fn(&str, Option<Value>, Vec<OwnedFd>) -> Result<(Option<Value>, Vec<OwnedFd>)>
@@ -41,6 +52,7 @@ impl Server {
         self.methods.insert(name.to_string(), Box::new(handler));
     }
 
+    /// Register a handler for a JSON-RPC notification.
     pub fn register_notification<F>(&mut self, name: &str, handler: F)
     where
         F: Fn(&str, Option<Value>, Vec<OwnedFd>) -> Result<()> + Send + Sync + 'static,
@@ -49,6 +61,7 @@ impl Server {
             .insert(name.to_string(), Box::new(handler));
     }
 
+    /// Start listening for connections on the given Unix socket path.
     pub async fn listen<P: AsRef<Path>>(self, path: P) -> Result<()> {
         let listener = UnixListener::bind(path)?;
         let server = Arc::new(self);
@@ -95,6 +108,7 @@ impl Server {
         Ok(())
     }
 
+    /// Process a single JSON-RPC message and send the response.
     pub async fn process_message(
         &self,
         message_with_fds: MessageWithFds,

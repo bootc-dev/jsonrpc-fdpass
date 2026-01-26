@@ -44,23 +44,33 @@
 //! ### Client Example
 //!
 //! ```rust,no_run
-//! use jsonrpc_fdpass::{Client, Result};
+//! use jsonrpc_fdpass::{
+//!     JsonRpcRequest, JsonRpcMessage, MessageWithFds, UnixSocketTransport, Result
+//! };
 //! use std::fs::File;
 //! use std::os::unix::io::OwnedFd;
 //! use serde_json::json;
+//! use tokio::net::UnixStream;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<()> {
-//!     let mut client = Client::connect("/tmp/test.sock").await?;
+//!     let stream = UnixStream::connect("/tmp/test.sock").await?;
+//!     let transport = UnixSocketTransport::new(stream);
+//!     let (mut sender, mut receiver) = transport.split();
 //!     
 //!     let file = File::open("example.txt").unwrap();
 //!     let fd: OwnedFd = file.into();
 //!     
-//!     let params = json!({
-//!         "filename": "example.txt"
-//!     });
+//!     let request = JsonRpcRequest::new(
+//!         "read_file".to_string(),
+//!         Some(json!({"filename": "example.txt"})),
+//!         json!(1),
+//!     );
+//!     let message = MessageWithFds::new(JsonRpcMessage::Request(request), vec![fd]);
+//!     sender.send(message).await?;
 //!     
-//!     client.call_method("read_file", Some(params), vec![fd]).await?;
+//!     let response = receiver.receive().await?;
+//!     println!("Response: {:?}", response.message);
 //!     
 //!     Ok(())
 //! }
@@ -96,14 +106,17 @@
 //! mapping between FD positions and parameters.
 
 #![forbid(unsafe_code)]
+#![deny(missing_docs)]
 
-pub mod client;
+/// Error types for JSON-RPC operations.
 pub mod error;
+/// JSON-RPC message types and serialization.
 pub mod message;
+/// JSON-RPC 2.0 server implementation with file descriptor passing.
 pub mod server;
+/// Low-level Unix socket transport with ancillary data support.
 pub mod transport;
 
-pub use client::Client;
 pub use error::{Error, Result};
 pub use jsonrpsee::types::error::{
     ErrorCode, ErrorObject as JsonRpcError, CALL_EXECUTION_FAILED_CODE, INTERNAL_ERROR_CODE,
