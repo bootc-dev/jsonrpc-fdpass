@@ -105,7 +105,12 @@ pub mod transport;
 
 pub use client::Client;
 pub use error::{Error, Result};
-pub use jsonrpsee::types::error::ErrorObject as JsonRpcError;
+pub use jsonrpsee::types::error::{
+    ErrorCode, ErrorObject as JsonRpcError, CALL_EXECUTION_FAILED_CODE, INTERNAL_ERROR_CODE,
+    INTERNAL_ERROR_MSG, INVALID_PARAMS_CODE, INVALID_PARAMS_MSG, INVALID_REQUEST_CODE,
+    INVALID_REQUEST_MSG, METHOD_NOT_FOUND_CODE, METHOD_NOT_FOUND_MSG, PARSE_ERROR_CODE,
+    PARSE_ERROR_MSG,
+};
 pub use message::{
     file_descriptor_error, JsonRpcMessage, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse,
     MessageWithFds, FILE_DESCRIPTOR_ERROR_CODE,
