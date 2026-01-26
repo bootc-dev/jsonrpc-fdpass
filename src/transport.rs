@@ -1,6 +1,7 @@
 use crate::error::{Error, Result};
-use crate::message::{get_fd_count, JsonRpcMessage, MessageWithFds};
+use crate::message::{get_fd_count, JsonRpcMessage, JsonRpcNotification, MessageWithFds};
 use rustix::fd::AsFd;
+use serde::Serialize;
 use rustix::net::{
     RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags, SendAncillaryBuffer,
     SendAncillaryMessage, SendFlags,
@@ -33,8 +34,8 @@ pub struct UnixSocketTransport {
 }
 
 impl UnixSocketTransport {
-    pub fn new(stream: TokioUnixStream) -> Result<Self> {
-        Ok(Self { stream })
+    pub fn new(stream: TokioUnixStream) -> Self {
+        Self { stream }
     }
 
     pub fn split(self) -> (Sender, Receiver) {
@@ -80,6 +81,36 @@ impl Sender {
     /// automatically reduced and the send is retried.
     pub fn set_max_fds_per_sendmsg(&mut self, max_fds: NonZeroUsize) {
         self.max_fds_per_sendmsg = max_fds;
+    }
+
+    /// Send a notification without file descriptors.
+    ///
+    /// This is a convenience method that serializes the params and constructs
+    /// the notification message automatically.
+    pub async fn notify<P: Serialize>(&mut self, method: &str, params: P) -> Result<()> {
+        self.notify_with_fds(method, params, Vec::new()).await
+    }
+
+    /// Send a notification with file descriptors.
+    ///
+    /// This is a convenience method that serializes the params and constructs
+    /// the notification message automatically.
+    pub async fn notify_with_fds<P: Serialize>(
+        &mut self,
+        method: &str,
+        params: P,
+        fds: Vec<OwnedFd>,
+    ) -> Result<()> {
+        let params_value = serde_json::to_value(params)?;
+        let params_opt = if params_value.is_null() {
+            None
+        } else {
+            Some(params_value)
+        };
+        let notification = JsonRpcNotification::new(method.to_string(), params_opt);
+        let message = JsonRpcMessage::Notification(notification);
+        let message_with_fds = MessageWithFds::new(message, fds);
+        self.send(message_with_fds).await
     }
 
     pub async fn send(&mut self, message_with_fds: MessageWithFds) -> Result<()> {
@@ -223,6 +254,10 @@ pub struct Receiver {
 }
 
 impl Receiver {
+    /// Receive a message, returning an error on connection close.
+    ///
+    /// See also [`receive_opt`](Self::receive_opt) which returns `Ok(None)`
+    /// on connection close instead of an error.
     pub async fn receive(&mut self) -> Result<MessageWithFds> {
         loop {
             if let Some(message) = self.try_parse_message()? {
@@ -230,6 +265,27 @@ impl Receiver {
             }
 
             self.read_more_data().await?;
+        }
+    }
+
+    /// Receive a message, returning `Ok(None)` on connection close.
+    ///
+    /// This is a convenience method that converts `Error::ConnectionClosed`
+    /// to `Ok(None)`, which is useful for receiver loops:
+    ///
+    /// ```ignore
+    /// while let Some(msg) = receiver.receive_opt().await? {
+    ///     // handle message
+    /// }
+    /// ```
+    ///
+    /// See also [`receive`](Self::receive) which returns an error on
+    /// connection close.
+    pub async fn receive_opt(&mut self) -> Result<Option<MessageWithFds>> {
+        match self.receive().await {
+            Ok(msg) => Ok(Some(msg)),
+            Err(Error::ConnectionClosed) => Ok(None),
+            Err(e) => Err(e),
         }
     }
 
