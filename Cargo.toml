@@ -7,6 +7,9 @@ authors = ["Colin Walters <walters@verbum.org>"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/cgwalters/spec-json-rpc-fdpass"
 
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -20,3 +23,4 @@ jsonrpsee = { version = "0.24", features = ["server", "client-core", "async-clie
 [dev-dependencies]
 tempfile = "3.0"
 async-trait = "0.1"
+kani-verifier = "0.67"

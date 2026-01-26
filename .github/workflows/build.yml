@@ -32,3 +32,12 @@ jobs:
         run: cargo build --all-targets
       - name: cargo test
         run: cargo test --all-targets
+
+  kani:
+    name: Kani formal verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Run Kani proofs
+        uses: model-checking/kani-github-action@v1
