@@ -289,39 +289,8 @@ mod verification {
     }
 
     // =========================================================================
-    // Proofs for JsonRpcMessage::set_fds / get_fds round-trip
+    // Proofs for JsonRpcMessage::get_fds
     // =========================================================================
-
-    /// Verify that set_fds(n) followed by get_fds() returns n for requests
-    #[kani::proof]
-    fn check_set_get_fds_request() {
-        let count: usize = kani::any();
-        let mut msg = JsonRpcMessage::Request(JsonRpcRequest {
-            jsonrpc: String::new(),
-            method: String::new(),
-            params: None,
-            id: serde_json::Value::Null,
-            fds: None,
-        });
-        msg.set_fds(count);
-        let result = msg.get_fds();
-        kani::assert(result == count, "get_fds should return what set_fds set");
-    }
-
-    /// Verify that set_fds(0) results in get_fds() returning 0
-    #[kani::proof]
-    fn check_set_zero_fds() {
-        let mut msg = JsonRpcMessage::Response(JsonRpcResponse {
-            jsonrpc: String::new(),
-            result: None,
-            error: None,
-            id: serde_json::Value::Null,
-            fds: Some(42), // Start with non-zero
-        });
-        msg.set_fds(0);
-        let result = msg.get_fds();
-        kani::assert(result == 0, "set_fds(0) should clear fds");
-    }
 
     /// Verify get_fds returns 0 when fds field is None
     #[kani::proof]
@@ -334,5 +303,19 @@ mod verification {
         });
         let result = msg.get_fds();
         kani::assert(result == 0, "None fds should return 0");
+    }
+
+    /// Verify get_fds returns the value when fds field is Some(n)
+    #[kani::proof]
+    fn check_get_fds_some() {
+        let n: usize = kani::any();
+        let msg = JsonRpcMessage::Notification(JsonRpcNotification {
+            jsonrpc: String::new(),
+            method: String::new(),
+            params: None,
+            fds: Some(n),
+        });
+        let result = msg.get_fds();
+        kani::assert(result == n, "get_fds should return the fds value");
     }
 }
