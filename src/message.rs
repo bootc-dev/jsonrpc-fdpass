@@ -20,7 +20,7 @@ pub fn get_fd_count(value: &serde_json::Value) -> usize {
 
 /// Helper to skip serializing fds field when it's None or 0
 fn skip_if_zero_or_none(fds: &Option<usize>) -> bool {
-    fds.map_or(true, |n| n == 0)
+    fds.is_none_or(|n| n == 0)
 }
 
 /// A JSON-RPC 2.0 request message.
@@ -255,4 +255,67 @@ pub fn file_descriptor_error() -> JsonRpcError<'static> {
         "File Descriptor Error",
         None::<serde_json::Value>,
     )
+}
+
+#[cfg(kani)]
+mod verification {
+    use super::*;
+
+    // =========================================================================
+    // Proofs for skip_if_zero_or_none
+    // =========================================================================
+
+    /// Verify that skip_if_zero_or_none returns true for None
+    #[kani::proof]
+    fn check_skip_none() {
+        let result = skip_if_zero_or_none(&None);
+        kani::assert(result, "None should be skipped");
+    }
+
+    /// Verify that skip_if_zero_or_none returns true for Some(0)
+    #[kani::proof]
+    fn check_skip_zero() {
+        let result = skip_if_zero_or_none(&Some(0));
+        kani::assert(result, "Some(0) should be skipped");
+    }
+
+    /// Verify that skip_if_zero_or_none returns false for any non-zero value
+    #[kani::proof]
+    fn check_skip_nonzero() {
+        let n: usize = kani::any();
+        kani::assume(n > 0);
+        let result = skip_if_zero_or_none(&Some(n));
+        kani::assert(!result, "Some(n > 0) should not be skipped");
+    }
+
+    // =========================================================================
+    // Proofs for JsonRpcMessage::get_fds
+    // =========================================================================
+
+    /// Verify get_fds returns 0 when fds field is None
+    #[kani::proof]
+    fn check_get_fds_none() {
+        let msg = JsonRpcMessage::Notification(JsonRpcNotification {
+            jsonrpc: String::new(),
+            method: String::new(),
+            params: None,
+            fds: None,
+        });
+        let result = msg.get_fds();
+        kani::assert(result == 0, "None fds should return 0");
+    }
+
+    /// Verify get_fds returns the value when fds field is Some(n)
+    #[kani::proof]
+    fn check_get_fds_some() {
+        let n: usize = kani::any();
+        let msg = JsonRpcMessage::Notification(JsonRpcNotification {
+            jsonrpc: String::new(),
+            method: String::new(),
+            params: None,
+            fds: Some(n),
+        });
+        let result = msg.get_fds();
+        kani::assert(result == n, "get_fds should return the fds value");
+    }
 }

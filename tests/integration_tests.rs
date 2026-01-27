@@ -195,9 +195,9 @@ async fn test_multiple_messages_with_fds_sequential() -> Result<()> {
 
     // Create multiple test files with different content
     let mut temp_files = Vec::new();
-    let test_contents = vec!["Content 1", "Content 2", "Content 3"];
+    let test_contents = ["Content 1", "Content 2", "Content 3"];
 
-    for (_i, content) in test_contents.iter().enumerate() {
+    for content in test_contents.iter() {
         let mut temp_file = NamedTempFile::new().unwrap();
         write!(temp_file, "{}", content).unwrap();
         temp_file.flush().unwrap();
@@ -1932,7 +1932,10 @@ async fn test_fd_batching_one_per_message() -> Result<()> {
                 assert_eq!(contents.trim(), expected, "FD {} has wrong content", i);
             }
 
-            Ok((Some(Value::String("All FDs verified".to_string())), Vec::new()))
+            Ok((
+                Some(Value::String("All FDs verified".to_string())),
+                Vec::new(),
+            ))
         });
 
         if let Ok((stream, _)) = listener.accept().await {
@@ -2105,13 +2108,18 @@ async fn test_fd_batching_interleaved_with_no_fd_messages() -> Result<()> {
             tf.flush().unwrap();
             temp_files.push(tf);
         }
-        let fds: Vec<OwnedFd> = temp_files.into_iter().map(|tf| tf.into_file().into()).collect();
+        let fds: Vec<OwnedFd> = temp_files
+            .into_iter()
+            .map(|tf| tf.into_file().into())
+            .collect();
         let request = JsonRpcRequest::new(
             "with_fds".to_string(),
             Some(serde_json::json!({ "expected_fds": 3 })),
             Value::Number(1.into()),
         );
-        sender.send(MessageWithFds::new(JsonRpcMessage::Request(request), fds)).await?;
+        sender
+            .send(MessageWithFds::new(JsonRpcMessage::Request(request), fds))
+            .await?;
     }
 
     // Message 2: No FDs
@@ -2121,7 +2129,12 @@ async fn test_fd_batching_interleaved_with_no_fd_messages() -> Result<()> {
             Some(serde_json::json!({ "check": "first" })),
             Value::Number(2.into()),
         );
-        sender.send(MessageWithFds::new(JsonRpcMessage::Request(request), vec![])).await?;
+        sender
+            .send(MessageWithFds::new(
+                JsonRpcMessage::Request(request),
+                vec![],
+            ))
+            .await?;
     }
 
     // Message 3: 2 FDs
@@ -2133,13 +2146,18 @@ async fn test_fd_batching_interleaved_with_no_fd_messages() -> Result<()> {
             tf.flush().unwrap();
             temp_files.push(tf);
         }
-        let fds: Vec<OwnedFd> = temp_files.into_iter().map(|tf| tf.into_file().into()).collect();
+        let fds: Vec<OwnedFd> = temp_files
+            .into_iter()
+            .map(|tf| tf.into_file().into())
+            .collect();
         let request = JsonRpcRequest::new(
             "with_fds".to_string(),
             Some(serde_json::json!({ "expected_fds": 2 })),
             Value::Number(3.into()),
         );
-        sender.send(MessageWithFds::new(JsonRpcMessage::Request(request), fds)).await?;
+        sender
+            .send(MessageWithFds::new(JsonRpcMessage::Request(request), fds))
+            .await?;
     }
 
     // Message 4: No FDs
@@ -2149,7 +2167,12 @@ async fn test_fd_batching_interleaved_with_no_fd_messages() -> Result<()> {
             Some(serde_json::json!({ "check": "second" })),
             Value::Number(4.into()),
         );
-        sender.send(MessageWithFds::new(JsonRpcMessage::Request(request), vec![])).await?;
+        sender
+            .send(MessageWithFds::new(
+                JsonRpcMessage::Request(request),
+                vec![],
+            ))
+            .await?;
     }
 
     // Message 5: 4 FDs
@@ -2161,13 +2184,18 @@ async fn test_fd_batching_interleaved_with_no_fd_messages() -> Result<()> {
             tf.flush().unwrap();
             temp_files.push(tf);
         }
-        let fds: Vec<OwnedFd> = temp_files.into_iter().map(|tf| tf.into_file().into()).collect();
+        let fds: Vec<OwnedFd> = temp_files
+            .into_iter()
+            .map(|tf| tf.into_file().into())
+            .collect();
         let request = JsonRpcRequest::new(
             "with_fds".to_string(),
             Some(serde_json::json!({ "expected_fds": 4 })),
             Value::Number(5.into()),
         );
-        sender.send(MessageWithFds::new(JsonRpcMessage::Request(request), fds)).await?;
+        sender
+            .send(MessageWithFds::new(JsonRpcMessage::Request(request), fds))
+            .await?;
     }
 
     server_handle.abort();
