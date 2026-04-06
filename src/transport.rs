@@ -8,6 +8,7 @@ use rustix::net::{
 use serde::Serialize;
 use std::collections::VecDeque;
 use std::io::{self, IoSlice, IoSliceMut};
+use std::mem::MaybeUninit;
 use std::num::NonZeroUsize;
 use std::os::unix::io::OwnedFd;
 use std::sync::Arc;
@@ -161,9 +162,11 @@ impl Sender {
                         // Send with FDs using sendmsg with ancillary data
                         let borrowed_fds: Vec<_> = fds_batch.iter().map(|fd| fd.as_fd()).collect();
 
-                        let mut buffer: Vec<u8> =
-                            vec![0u8; rustix::cmsg_space!(ScmRights(MAX_FDS_PER_RECVMSG))];
-                        let mut control = SendAncillaryBuffer::new(buffer.as_mut_slice());
+                        let mut buffer: [MaybeUninit<u8>;
+                            rustix::cmsg_space!(ScmRights(MAX_FDS_PER_RECVMSG))] =
+                            [MaybeUninit::uninit();
+                                rustix::cmsg_space!(ScmRights(MAX_FDS_PER_RECVMSG))];
+                        let mut control = SendAncillaryBuffer::new(&mut buffer);
 
                         if !control.push(SendAncillaryMessage::ScmRights(&borrowed_fds)) {
                             return Err(io::Error::other(
@@ -358,9 +361,10 @@ impl Receiver {
                 let sockfd = self.stream.as_fd();
 
                 let mut iov = [IoSliceMut::new(&mut data_buffer)];
-                let mut cmsg_space: Vec<u8> =
-                    vec![0u8; rustix::cmsg_space!(ScmRights(MAX_FDS_PER_RECVMSG))];
-                let mut cmsg_buffer = RecvAncillaryBuffer::new(cmsg_space.as_mut_slice());
+                let mut cmsg_space: [MaybeUninit<u8>;
+                    rustix::cmsg_space!(ScmRights(MAX_FDS_PER_RECVMSG))] =
+                    [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(MAX_FDS_PER_RECVMSG))];
+                let mut cmsg_buffer = RecvAncillaryBuffer::new(&mut cmsg_space);
 
                 let result = rustix::net::recvmsg(
                     sockfd,
