@@ -1,5 +1,5 @@
 use crate::error::{Error, Result};
-use crate::message::{file_descriptor_error, JsonRpcMessage, JsonRpcResponse, MessageWithFds};
+use crate::message::{JsonRpcMessage, JsonRpcResponse, MessageWithFds, file_descriptor_error};
 use crate::transport::{Sender, UnixSocketTransport};
 use jsonrpsee::types::error::ErrorObject;
 use serde_json::Value;
@@ -150,14 +150,14 @@ impl Server {
             JsonRpcMessage::Notification(notification) => {
                 debug!("Processing notification: {}", notification.method);
 
-                if let Some(handler) = self.notifications.get(&notification.method) {
-                    if let Err(e) = handler(
+                if let Some(handler) = self.notifications.get(&notification.method)
+                    && let Err(e) = handler(
                         &notification.method,
                         notification.params,
                         message_with_fds.file_descriptors,
-                    ) {
-                        error!("Notification handler error: {}", e);
-                    }
+                    )
+                {
+                    error!("Notification handler error: {}", e);
                 }
             }
             JsonRpcMessage::Response(_) => {

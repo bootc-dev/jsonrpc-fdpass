@@ -54,10 +54,10 @@ async fn run_server(listener: UnixListener) -> Result<()> {
 
     // Register a notification handler
     server.register_notification("log_message", |_method, params, _fds| {
-        if let Some(Value::Object(map)) = params {
-            if let Some(Value::String(message)) = map.get("message") {
-                info!("Server received log: {}", message);
-            }
+        if let Some(Value::Object(map)) = params
+            && let Some(Value::String(message)) = map.get("message")
+        {
+            info!("Server received log: {}", message);
         }
         Ok(())
     });
