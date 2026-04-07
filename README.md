@@ -32,7 +32,7 @@ JSON is a self-delimiting format—a compliant parser can determine where one JS
 
 To ensure file descriptors are correctly associated with their corresponding messages, a sending party MUST adhere to the following rules:
 
-1. **File Descriptor Ordering:** All file descriptors referenced by a message MUST be sent (via ancillary data) before or with the final bytes of that message. The receiver dequeues FDs in order as complete messages are parsed; if the required FDs have not yet arrived, the connection is terminated with a Mismatched Count error.
+1. **File Descriptor Ordering:** All file descriptors referenced by a message MUST be sent (via ancillary data) before any bytes of the next message are transmitted. Because FDs may be batched across multiple sendmsg() calls (see Section 4.1), the receiver's JSON parser may finish parsing a message before all of its FDs have arrived. The receiver MUST handle this by waiting for additional data; see Section 5, Step 4.
 
 ## 3. Message Format
 
@@ -71,7 +71,7 @@ Operating systems impose limits on the number of file descriptors that can be pa
 
 When a message requires more file descriptors than can be sent in a single sendmsg() call, the additional FDs MUST be sent before any bytes of the next message. Since some systems require non-empty data for ancillary data delivery, these continuation calls MUST send a single whitespace byte (space, `0x20`) as payload. The receiver's JSON parser will ignore inter-message whitespace per RFC 8259.
 
-This ensures the receiver can dispatch each message as soon as it is fully parsed, without buffering subsequent messages while waiting for FDs.
+Because the JSON data for a message may arrive in a single recvmsg() call while its FDs are still in transit, the receiver MUST be prepared to buffer a parsed message and continue reading until the required FDs have arrived (see Section 5, Step 4).
 
 Implementations SHOULD use a batch size in the range of 200-500 FDs and handle `EINVAL` (or equivalent) by reducing the batch size and retrying.
 
@@ -89,7 +89,7 @@ Because SOCK_STREAM does not preserve message boundaries, the receiver MUST impl
    1. **Streaming Parse:** Attempt to parse a complete JSON object from the beginning of the byte buffer using a streaming JSON parser. If the buffer contains an incomplete JSON value (e.g., the parser encounters EOF mid-value), the processing loop terminates until more data is received.
    2. **Handle Parse Result:** If parsing succeeds, record the number of bytes consumed. If parsing fails with a syntax error (not EOF), this is a fatal Framing Error (see Section 7), and the connection MUST be closed.
    3. **Read FD Count:** Read the `fds` field from the parsed JSON message to determine the number of file descriptors (N) associated with this message. If the field is absent, N is 0.
-   4. **Check FD Queue:** Check if the file descriptor queue contains at least N FDs. If it contains fewer than N FDs, this is a fatal Mismatched Count error (see Section 7). The protocol state is desynchronized, and the connection MUST be closed.
+   4. **Check FD Queue:** Check if the file descriptor queue contains at least N FDs. If it contains fewer than N FDs, the receiver MUST buffer the parsed message and return to reading from the socket (outer Step 2) until enough FDs have been received. Between messages, the only bytes the sender may transmit are whitespace continuation bytes carrying additional FDs (see Section 4.1). After each read, if the byte buffer contains any non-whitespace byte (i.e. the start of the next JSON message) and the FD queue still has fewer than N FDs, this is a fatal Mismatched Count error (see Section 7) — the sender has violated the ordering rule in Section 2.3 by beginning the next message before delivering all FDs for the current one. If the connection is closed before all N FDs have arrived, this is also a fatal Mismatched Count error.
    5. **Dequeue and Associate:** Dequeue the first N file descriptors from the front of the queue. These FDs correspond positionally (0 through N-1) to the file descriptors expected by the application for this message.
    6. **Dispatch:** The fully-formed message (with FDs) is now ready and SHOULD be dispatched to the application logic for handling.
    7. **Consume Bytes:** The consumed bytes MUST be removed from the front of the byte buffer.
@@ -134,7 +134,7 @@ The primary error code for these issues is:
 **Conditions that MUST be treated as fatal errors:**
 
 * **Framing Error:** The byte stream cannot be parsed as valid JSON (syntax error, not incomplete data).
-* **Mismatched Count:** A parsed message's `fds` field specifies N file descriptors, but the receiver's file descriptor queue contains fewer than N available FDs at the time of processing.
+* **Mismatched Count:** A parsed message's `fds` field specifies N file descriptors, but either the connection was closed or a non-continuation character was received before N FDs were received. This indicates that the sender failed to deliver the promised file descriptors.
 
 ## 8. Security Considerations
 
