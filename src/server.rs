@@ -1,5 +1,5 @@
 use crate::error::{Error, Result};
-use crate::message::{file_descriptor_error, JsonRpcMessage, JsonRpcResponse, MessageWithFds};
+use crate::message::{JsonRpcMessage, JsonRpcResponse, MessageWithFds, file_descriptor_error};
 use crate::transport::{Sender, UnixSocketTransport};
 use jsonrpsee::types::error::ErrorObject;
 use serde_json::Value;

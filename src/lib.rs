@@ -119,14 +119,14 @@ pub mod transport;
 
 pub use error::{Error, Result};
 pub use jsonrpsee::types::error::{
-    ErrorCode, ErrorObject as JsonRpcError, CALL_EXECUTION_FAILED_CODE, INTERNAL_ERROR_CODE,
+    CALL_EXECUTION_FAILED_CODE, ErrorCode, ErrorObject as JsonRpcError, INTERNAL_ERROR_CODE,
     INTERNAL_ERROR_MSG, INVALID_PARAMS_CODE, INVALID_PARAMS_MSG, INVALID_REQUEST_CODE,
     INVALID_REQUEST_MSG, METHOD_NOT_FOUND_CODE, METHOD_NOT_FOUND_MSG, PARSE_ERROR_CODE,
     PARSE_ERROR_MSG,
 };
 pub use message::{
-    file_descriptor_error, JsonRpcMessage, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse,
-    MessageWithFds, FILE_DESCRIPTOR_ERROR_CODE,
+    FILE_DESCRIPTOR_ERROR_CODE, JsonRpcMessage, JsonRpcNotification, JsonRpcRequest,
+    JsonRpcResponse, MessageWithFds, file_descriptor_error,
 };
 pub use server::Server;
-pub use transport::{Receiver, Sender, UnixSocketTransport, DEFAULT_MAX_FDS_PER_SENDMSG};
+pub use transport::{DEFAULT_MAX_FDS_PER_SENDMSG, Receiver, Sender, UnixSocketTransport};
