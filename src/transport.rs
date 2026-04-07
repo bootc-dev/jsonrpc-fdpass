@@ -55,6 +55,7 @@ impl UnixSocketTransport {
                 stream,
                 buffer: Vec::new(),
                 fd_queue: VecDeque::new(),
+                pending_message: None,
             },
         )
     }
@@ -262,6 +263,8 @@ pub struct Receiver {
     stream: Arc<TokioUnixStream>,
     buffer: Vec<u8>,
     fd_queue: VecDeque<OwnedFd>,
+    /// A fully parsed JSON message waiting for its FDs to arrive.
+    pending_message: Option<(serde_json::Value, usize)>,
 }
 
 impl Receiver {
@@ -275,7 +278,19 @@ impl Receiver {
                 return Ok(message);
             }
 
-            self.read_more_data().await?;
+            if let Err(e) = self.read_more_data().await {
+                if matches!(e, Error::ConnectionClosed)
+                    && let Some((_, fd_count)) = self.pending_message.take()
+                {
+                    // Connection closed while waiting for FDs — per spec
+                    // Section 5, Step 4 this is a Mismatched Count error.
+                    return Err(Error::MismatchedCount {
+                        expected: fd_count,
+                        found: self.fd_queue.len(),
+                    });
+                }
+                return Err(e);
+            }
         }
     }
 
@@ -300,7 +315,47 @@ impl Receiver {
         }
     }
 
+    /// Build a `MessageWithFds` by draining `fd_count` FDs from the queue.
+    fn build_message(
+        fd_queue: &mut VecDeque<OwnedFd>,
+        value: serde_json::Value,
+        fd_count: usize,
+    ) -> Result<MessageWithFds> {
+        let fds: Vec<OwnedFd> = fd_queue.drain(..fd_count).collect();
+        let message = JsonRpcMessage::from_json_value(value)?;
+        Ok(MessageWithFds::new(message, fds))
+    }
+
     fn try_parse_message(&mut self) -> Result<Option<MessageWithFds>> {
+        // Check if we have a pending message waiting for FDs.
+        // While a message is pending, all subsequent message parsing is
+        // blocked — even messages needing 0 FDs.  This preserves FIFO
+        // ordering on the Unix socket: FDs queued after the pending
+        // message's FDs belong to later messages and must not be
+        // consumed early.
+        if let Some((value, fd_count)) = self
+            .pending_message
+            .take_if(|(_, c)| self.fd_queue.len() >= *c)
+        {
+            return Ok(Some(Self::build_message(
+                &mut self.fd_queue,
+                value,
+                fd_count,
+            )?));
+        } else if let Some((_, fd_count)) = &self.pending_message {
+            // Not enough FDs yet.  Per the spec (Section 5, Step 4),
+            // if the buffer contains any non-whitespace byte the sender
+            // has started the next message before delivering all FDs for
+            // the current one — that is a fatal protocol violation.
+            if self.buffer.iter().any(|&b| !b.is_ascii_whitespace()) {
+                return Err(Error::MismatchedCount {
+                    expected: *fd_count,
+                    found: self.fd_queue.len(),
+                });
+            }
+            return Ok(None);
+        }
+
         if self.buffer.is_empty() {
             return Ok(None);
         }
@@ -323,18 +378,33 @@ impl Receiver {
                 let fd_count = get_fd_count(&value);
 
                 if fd_count > self.fd_queue.len() {
-                    return Err(Error::MismatchedCount {
-                        expected: fd_count,
-                        found: self.fd_queue.len(),
-                    });
+                    // FDs may arrive across multiple recvmsg() calls when the
+                    // sender batches them.  Buffer the parsed message and let
+                    // the receive() loop read more data.
+                    //
+                    // Per the spec (Section 5, Step 4), if the buffer already
+                    // contains non-whitespace bytes the sender has started the
+                    // next message before delivering all FDs — a fatal error.
+                    if self.buffer.iter().any(|&b| !b.is_ascii_whitespace()) {
+                        return Err(Error::MismatchedCount {
+                            expected: fd_count,
+                            found: self.fd_queue.len(),
+                        });
+                    }
+                    trace!(
+                        "Message expects {} FDs but only {} available, waiting for more",
+                        fd_count,
+                        self.fd_queue.len()
+                    );
+                    self.pending_message = Some((value, fd_count));
+                    return Ok(None);
                 }
 
-                let fds: Vec<OwnedFd> = (0..fd_count)
-                    .map(|_| self.fd_queue.pop_front().unwrap())
-                    .collect();
-
-                let message = JsonRpcMessage::from_json_value(value)?;
-                Ok(Some(MessageWithFds::new(message, fds)))
+                Ok(Some(Self::build_message(
+                    &mut self.fd_queue,
+                    value,
+                    fd_count,
+                )?))
             }
             Some(Err(e)) if e.is_eof() => {
                 // Incomplete JSON - need more data

@@ -2276,3 +2276,192 @@ async fn test_fd_batching_many_fds_small_batches() -> Result<()> {
     server_handle.abort();
     Ok(())
 }
+
+/// Test that the receiver correctly waits for batched FDs from the server.
+///
+/// When the server responds with many FDs using a small batch size, the
+/// receiver may parse the JSON message before all FDs have arrived.  The
+/// receiver must buffer the parsed message and keep reading until enough
+/// FDs are available, rather than returning a MismatchedCount error.
+#[tokio::test]
+async fn test_receiver_waits_for_batched_response_fds() -> Result<()> {
+    let temp_dir = TempDir::new().unwrap();
+    let socket_path = temp_dir.path().join("test_receiver_batch.sock");
+
+    let num_fds = 5;
+
+    let listener = tokio::net::UnixListener::bind(&socket_path).unwrap();
+
+    let server_handle = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let transport = UnixSocketTransport::new(stream);
+        let (mut sender, mut receiver) = transport.split();
+
+        // Force small batches on the server side so the client's
+        // receiver sees FDs arriving across multiple recvmsg() calls.
+        sender.set_max_fds_per_sendmsg(NonZeroUsize::new(1).unwrap());
+
+        // Read the request.
+        let request = receiver.receive().await.unwrap();
+        assert!(request.file_descriptors.is_empty());
+
+        // Build a response with many FDs.
+        let mut fds: Vec<OwnedFd> = Vec::new();
+        for i in 0..num_fds {
+            let mut temp_file = NamedTempFile::new().unwrap();
+            write!(temp_file, "response file {i}").unwrap();
+            temp_file.flush().unwrap();
+            temp_file.seek(SeekFrom::Start(0)).unwrap();
+            fds.push(temp_file.into_file().into());
+        }
+
+        let response = jsonrpc_fdpass::JsonRpcResponse::success(
+            Value::String("here are your files".to_string()),
+            Value::Number(1.into()),
+        );
+        let msg = MessageWithFds::new(JsonRpcMessage::Response(response), fds);
+        sender.send(msg).await.unwrap();
+    });
+
+    // Client side: send request, receive response with batched FDs.
+    let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
+    let transport = UnixSocketTransport::new(stream);
+    let (mut sender, mut receiver) = transport.split();
+
+    let request = JsonRpcRequest::new("get_files".to_string(), None, Value::Number(1.into()));
+    sender
+        .send(MessageWithFds::new(
+            JsonRpcMessage::Request(request),
+            Vec::new(),
+        ))
+        .await?;
+
+    // This is the critical part: the receiver must wait for all FDs
+    // instead of failing with MismatchedCount.
+    let response = receiver.receive().await?;
+    assert_eq!(
+        response.file_descriptors.len(),
+        num_fds,
+        "Expected {num_fds} FDs in batched response"
+    );
+
+    // Verify FD contents are correct and in order.
+    for (i, fd) in response.file_descriptors.into_iter().enumerate() {
+        let mut file = File::from(fd);
+        let mut contents = String::new();
+        file.seek(SeekFrom::Start(0)).unwrap();
+        file.read_to_string(&mut contents).unwrap();
+        assert_eq!(contents, format!("response file {i}"));
+    }
+
+    server_handle.await.unwrap();
+    Ok(())
+}
+
+/// Test that the receiver returns MismatchedCount when the sender starts a new
+/// message before delivering all FDs for the current one (protocol violation).
+#[tokio::test]
+async fn test_receiver_errors_on_next_message_before_fds() -> Result<()> {
+    let temp_dir = TempDir::new().unwrap();
+    let socket_path = temp_dir.path().join("test_next_msg_violation.sock");
+
+    let listener = tokio::net::UnixListener::bind(&socket_path).unwrap();
+
+    let server_handle = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let transport = UnixSocketTransport::new(stream);
+        let (_sender, mut receiver) = transport.split();
+
+        // The client will claim fds but send a second message before
+        // delivering them.  We expect a MismatchedCount error.
+        match receiver.receive().await {
+            Err(jsonrpc_fdpass::Error::MismatchedCount { expected, found }) => {
+                assert_eq!(expected, 2);
+                assert_eq!(found, 0);
+            }
+            Err(e) => panic!("Expected MismatchedCount, got: {e:?}"),
+            Ok(_) => panic!("Should have failed with MismatchedCount"),
+        }
+    });
+
+    // Connect and send a message claiming 2 FDs, then immediately send
+    // a second message without delivering any FDs.
+    let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
+
+    use tokio::io::AsyncWriteExt;
+    let mut stream = stream;
+
+    let first = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "need_fds",
+        "params": {},
+        "id": 1,
+        "fds": 2
+    });
+    let second = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "violation",
+        "params": {},
+        "id": 2
+    });
+
+    // Send both messages back-to-back without any FDs.
+    let mut payload = serde_json::to_vec(&first).unwrap();
+    payload.extend_from_slice(&serde_json::to_vec(&second).unwrap());
+    stream.write_all(&payload).await.unwrap();
+    stream.flush().await.unwrap();
+
+    server_handle.await.unwrap();
+    Ok(())
+}
+
+/// Test that the receiver returns MismatchedCount when the connection is
+/// closed while waiting for batched FDs.
+#[tokio::test]
+async fn test_receiver_errors_on_close_while_pending() -> Result<()> {
+    let temp_dir = TempDir::new().unwrap();
+    let socket_path = temp_dir.path().join("test_close_pending.sock");
+
+    let listener = tokio::net::UnixListener::bind(&socket_path).unwrap();
+
+    let server_handle = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let transport = UnixSocketTransport::new(stream);
+        let (_sender, mut receiver) = transport.split();
+
+        match receiver.receive().await {
+            Err(jsonrpc_fdpass::Error::MismatchedCount { expected, found }) => {
+                assert_eq!(expected, 3);
+                assert_eq!(found, 0);
+            }
+            Err(e) => panic!("Expected MismatchedCount, got: {e:?}"),
+            Ok(_) => panic!("Should have failed with MismatchedCount"),
+        }
+    });
+
+    // Connect, send a message claiming 3 FDs, then drop the connection.
+    let stream = tokio::net::UnixStream::connect(&socket_path).await.unwrap();
+
+    use tokio::io::AsyncWriteExt;
+    let mut stream = stream;
+
+    let msg = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "test",
+        "params": {},
+        "id": 1,
+        "fds": 3
+    });
+
+    stream
+        .write_all(&serde_json::to_vec(&msg).unwrap())
+        .await
+        .unwrap();
+    stream.flush().await.unwrap();
+
+    // Close the connection without sending any FDs.
+    drop(stream);
+
+    server_handle.await.unwrap();
+    Ok(())
+}
