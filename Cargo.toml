@@ -1,7 +1,7 @@
 [package]
 name = "jsonrpc-fdpass"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 description = "JSON-RPC 2.0 with Unix file descriptor passing"
 authors = ["Colin Walters <walters@verbum.org>"]
 license = "MIT OR Apache-2.0"

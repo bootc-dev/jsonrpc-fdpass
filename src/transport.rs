@@ -1,5 +1,5 @@
 use crate::error::{Error, Result};
-use crate::message::{get_fd_count, JsonRpcMessage, JsonRpcNotification, MessageWithFds};
+use crate::message::{JsonRpcMessage, JsonRpcNotification, MessageWithFds, get_fd_count};
 use rustix::fd::AsFd;
 use rustix::net::{
     RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags, SendAncillaryBuffer,
