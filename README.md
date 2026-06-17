@@ -1,4 +1,6 @@
 # JSON-RPC 2.0 with Unix File Descriptor Passing
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fbootc-dev%2Fjsonrpc-fdpass.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2Fbootc-dev%2Fjsonrpc-fdpass?ref=badge_shield)
+
 
 This repository contains both a protocol specification and a Rust implementation
 (`jsonrpc-fdpass` crate) for JSON-RPC 2.0 with file descriptor passing over Unix
@@ -143,3 +145,7 @@ The security considerations are identical to those for other Unix domain socket 
 * **Socket Permissions:** Filesystem permissions on the socket file are the primary access control mechanism.
 * **Trust Boundary:** The communicating processes must have a degree of mutual trust, as passing a file descriptor is a grant of capability.
 * **Resource Management:** The receiving process is responsible for closing all file descriptors it receives to prevent resource leaks. If a connection is terminated due to a protocol error, the receiver MUST ensure that any FDs remaining in its queue are closed.
+
+
+## License
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fbootc-dev%2Fjsonrpc-fdpass.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Fbootc-dev%2Fjsonrpc-fdpass?ref=badge_large)
