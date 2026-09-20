@@ -23,4 +23,4 @@ jsonrpsee = { version = "0.26", features = ["server", "client-core", "async-clie
 [dev-dependencies]
 tempfile = "3.0"
 async-trait = "0.1"
-kani-verifier = "0.67"
+kani-verifier = "0.68"
